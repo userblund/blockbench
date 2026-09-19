@@ -29,6 +29,12 @@
       loses: ['arbitraryVertexWeights', 'inverseBindMatrices']
     },
     {
+      id: 'native_blockbench_weighted_armature',
+      family: 'blockbench_native_skinning',
+      description: 'Native Blockbench armature + mesh vertex weights + animation tracks, preserving the GLB skinning data before Bedrock serialization.',
+      preserves: ['positions', 'normals', 'texcoords0', 'indices', 'materials', 'joints0', 'weights0', 'inverseBindMatrices', 'skeletonHierarchy', 'animationTracks'],
+      loses: [],
+    },
       id: 'china_polymesh_skeleton_animation',
       family: 'bedrock_china_reference',
       description: 'Polymesh + per-vertex bone weights + skeleton + animation tracks.',
@@ -514,6 +520,98 @@
     };
   }
 
+  /*
+   * Candidate V2:
+   * Preserve the GLB skin continuously inside Blockbench's native armature
+   * representation. Blockbench ArmatureBone stores per-vertex weights and
+   * exposes an inverse bind matrix in the preview controller.
+   *
+   * This is intentionally an intermediate/native candidate. It is NOT yet
+   * a claim that vanilla Bedrock serialization preserves those weights.
+   */
+  function buildNativeBlockbenchWeightedArmatureCandidate(intermediate) {
+    const source = glbIntermediateToRouteInput(intermediate);
+    const primitive = intermediate.meshes[0]?.primitives[0];
+    if (!primitive) throw new Error('HARAGANZITO_NO_PRIMITIVE_FOR_NATIVE_ARMATURE');
+
+    const sourceWeights = primitive.attributes?.WEIGHTS_0 || [];
+    const sourceJoints = primitive.attributes?.JOINTS_0 || [];
+
+    const vertices = source.vertices.map((vertex, index) => ({
+      index,
+      position: [...vertex.position],
+      normal: [...vertex.normal],
+      uv: [...vertex.uv],
+      influences: (sourceJoints[index] || []).map((boneIndex, slot) => ({
+        boneIndex,
+        boneName: source.bones[boneIndex]?.name || null,
+        weight: Number(sourceWeights[index]?.[slot] ?? 0)
+      })).filter(influence => influence.weight !== 0)
+    }));
+
+    const bones = source.bones.map(bone => ({
+      index: bone.index,
+      nodeIndex: bone.nodeIndex,
+      name: bone.name,
+      parent: bone.parent,
+      origin: [...bone.position],
+      rotationQuaternion: [...bone.quaternion],
+      scale: [...bone.scale],
+      inverseBindMatrix: clone(bone.inverseBindMatrix)
+    }));
+
+    const animations = source.animations.map(animation => ({
+      name: animation.name,
+      id: animation.id,
+      length: animation.length,
+      tracks: animation.tracks.map(track => ({
+        bone: track.bone,
+        path: track.path,
+        interpolation: track.interpolation,
+        channelMask: track.channelMask,
+        keyframes: clone(track.keyframes)
+      }))
+    }));
+
+    const influenceCount = vertices.map(v => v.influences.length);
+    const weightSumErrorMax = vertices.reduce((max, vertex) => {
+      const sum = vertex.influences.reduce((s, influence) => s + influence.weight, 0);
+      return Math.max(max, Math.abs(sum - 1));
+    }, 0);
+
+    return {
+      schema: 'haraganzito.candidate.native_blockbench_weighted_armature.v1',
+      route: 'native_blockbench_weighted_armature',
+      exactSourcePreservation: true,
+      runtimeCompatibility: 'not_yet_determined',
+      representation: {
+        type: 'Blockbench Armature + Mesh',
+        weightedVertices: true,
+        inverseBindMatrices: true,
+        animationTracks: true
+      },
+      mesh: {
+        vertices,
+        indices: clone(primitive.indices || []),
+        mode: primitive.mode ?? 4,
+        material: primitive.material ?? null
+      },
+      skeleton: {
+        bones
+      },
+      animations,
+      diagnostics: {
+        vertexCount: vertices.length,
+        indexCount: (primitive.indices || []).length,
+        boneCount: bones.length,
+        animationCount: animations.length,
+        maxInfluencesPerVertex: Math.max(0, ...influenceCount),
+        minInfluencesPerVertex: influenceCount.length ? Math.min(...influenceCount) : 0,
+        weightSumErrorMax
+      }
+    };
+  }
+
   function buildChinaReferenceCandidate(intermediate) {
     if (!intermediate || !Array.isArray(intermediate.vertices)) {
       throw new Error('HARAGANZITO_NO_INTERMEDIATE_VERTICES');
@@ -643,6 +741,7 @@
         compareErrors,
         classifyIteration,
         recordIteration,
+        buildNativeBlockbenchWeightedArmatureCandidate,
         buildChinaReferenceCandidate,
         glbIntermediateToRouteInput,
         buildRigidPolyMeshCandidate,
