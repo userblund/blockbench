@@ -222,7 +222,7 @@ function evaluateAnimation(animation) {
   const meshLocal = mul(containerInverse, meshWorldAtBind);
   const meshLocalInverse = invert(meshLocal);
 
-  const nativeIBMs = skin.inverseBindMatrices.map(ibm => mul(ibm, containerInverse));
+  const nativeIBMs = skin.inverseBindMatrices.map(ibm => ibm.slice());
   let maxError = 0;
   let worst = null;
 
@@ -236,15 +236,23 @@ function evaluateAnimation(animation) {
       const gltfLocalSkin = mul(containerInverse, mul(jointWorld, rawIBM));
 
       /*
-       * Blockbench's Armature.calculateVertexDeformation uses:
+       * Native route architecture:
        *
-       *   B^-1 * Aparent^-1 * BoneWorld * NativeIBM * B
+       *   Container(Group, static GLB transform)
+       *      -> Armature(identity)
+       *         -> Mesh(identity)
+       *         -> Bones
        *
-       * Here the imported Armature is the root object (Aparent=I) and
-       * B is the mesh world matrix, so the native candidate is:
+       * Blockbench's deformation correction uses the Armature parent inverse.
+       * Therefore:
+       *
+       *   B^-1 * Container^-1 * BoneWorld * IBM * B
+       *
+       * reduces to the GLB container-local skin matrix when the Haraganzito
+       * mesh node is identity under the common container.
        */
       const blockbenchLocalSkin =
-        mul(meshLocalInverse, mul(jointWorld, mul(nativeIBMs[j], meshLocal)));
+        mul(meshLocalInverse, mul(containerInverse, mul(jointWorld, mul(nativeIBMs[j], meshLocal))));
 
       const error = maxAbsDiff(gltfLocalSkin, blockbenchLocalSkin);
       maxError = Math.max(maxError, error);
@@ -281,7 +289,7 @@ const report = {
     skeletonRoot,
     containerNodeIndex,
     containerName: glb.nodes[containerNodeIndex]?.name || null,
-    rule: 'nativeIBM = gltfIBM * inverse(containerWorld)'
+    rule: 'static GLB container is preserved as an external Blockbench Group; nativeIBM = gltfIBM'
   },
   animations,
   classification: {
