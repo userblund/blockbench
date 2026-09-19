@@ -332,6 +332,59 @@
    * This is deliberately a rigid-skin candidate. It is not claimed exact.
    * The iterator can compare it and move to a different representation.
    */
+
+  function quaternionToEulerDegrees(q) {
+    const x=q[0]||0, y=q[1]||0, z=q[2]||0, w=q[3]===undefined?1:q[3];
+    const sinr=2*(w*x+y*z), cosr=1-2*(x*x+y*y);
+    const roll=Math.atan2(sinr,cosr);
+    const sinp=2*(w*y-z*x);
+    const pitch=Math.abs(sinp)>=1 ? Math.sign(sinp)*Math.PI/2 : Math.asin(sinp);
+    const siny=2*(w*z+x*y), cosy=1-2*(y*y+z*z);
+    const yaw=Math.atan2(siny,cosy);
+    return [roll*180/Math.PI,pitch*180/Math.PI,yaw*180/Math.PI];
+  }
+
+  function buildBedrockAnimationFiles(intermediate) {
+    const source=glbIntermediateToRouteInput(intermediate);
+    const files=[];
+    for (const animation of intermediate.animations || []) {
+      const bones={};
+      for (const channel of animation.channels || []) {
+        const sampler=animation.samplers[channel.sampler];
+        const bone=source.bones.find(b=>b.nodeIndex===channel.targetNode);
+        if (!sampler || !bone) continue;
+        if (!bones[bone.name]) bones[bone.name]={};
+        const keyframes={};
+        sampler.input.forEach((time,k)=>{
+          let value=sampler.output[k] || [];
+          if (channel.path==='translation') {
+            value=[-(value[0]||0), value[1]||0, value[2]||0];
+            keyframes[String(time)]=value;
+          } else if (channel.path==='scale') {
+            keyframes[String(time)]=[value[0]??1,value[1]??1,value[2]??1];
+          } else if (channel.path==='rotation') {
+            const e=quaternionToEulerDegrees(value);
+            keyframes[String(time)]=[-e[0],-e[1],e[2]];
+          }
+        });
+        if (channel.path==='translation') bones[bone.name].position=keyframes;
+        if (channel.path==='rotation') bones[bone.name].rotation=keyframes;
+        if (channel.path==='scale') bones[bone.name].scale=keyframes;
+      }
+      files.push({
+        format_version:'1.8.0',
+        animations:{
+          [animation.name]:{
+            animation_length:Math.max(0,...animation.samplers.flatMap(s=>s.input||[])),
+            loop:true,
+            bones
+          }
+        }
+      });
+    }
+    return files;
+  }
+
   function buildRigidPolyMeshCandidate(intermediate, options = {}) {
     const source = glbIntermediateToRouteInput(intermediate);
     const flipX = options.flipX !== false;
@@ -593,6 +646,7 @@
         buildChinaReferenceCandidate,
         glbIntermediateToRouteInput,
         buildRigidPolyMeshCandidate,
+        buildBedrockAnimationFiles,
         search
       };
       console.log('[HaraganzitoIterator] v' + VERSION + ' loaded');
