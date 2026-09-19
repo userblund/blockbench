@@ -541,6 +541,12 @@
 
     buildPreviewAnimations(intermediate, armature);
 
+    // Keep the complete parsed GLB intermediate attached to the project.
+    // This is the immutable source-of-truth for later bridge routes and
+    // prevents the native weighted representation from becoming a lossy
+    // one-way import.
+    Project.haraganzito_source_intermediate = clone(intermediate);
+
     const validation = validateImportedProject(intermediate, armature, meshResult.mesh, meshResult.vertexKeys);
     Project.haraganzito_native_validation = validation;
     Project.haraganzito_source_glb_summary = HaraganzitoGLBParser.summarize(intermediate);
@@ -597,6 +603,7 @@
       },
       onunload() {
         delete Project.haraganzito_source_animations;
+        delete Project.haraganzito_source_intermediate;
         delete Project.haraganzito_native_validation;
         delete Project.haraganzito_source_glb_summary;
       }
