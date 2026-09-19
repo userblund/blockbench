@@ -71,7 +71,26 @@
       "purpose": "test whether poly_mesh attached to animated bones is sufficient",
       "animated": true,
       "skinning_mode": "rigid_per_bone",
-      "diagnostic": "Exact continuous skinning is not representable by the documented vanilla poly_mesh schema when vertices have multiple nonzero influences; this route is retained only as a measured rigid approximation."
+      "diagnostic": "Exact continuous skinning is not representable by the documented vanilla poly_mesh schema when vertices have multiple nonzero influences; this route is retained only as a measured rigid approximation.",
+      "quantitative_validation": {
+        "checked_glb": "rigged-model.glb",
+        "samples_by_animation": {
+          "Idle": 151,
+          "Jump": 151,
+          "Jump Land": 77,
+          "Jump Start": 81,
+          "Sprint": 41,
+          "Walk": 81
+        },
+        "triangle_count": 50000,
+        "triangle_corners_evaluated": 87300000,
+        "maxAbsoluteError": 0.2991535731242678,
+        "aggregateSquaredError": 25576.520625631885,
+        "rmse": 0.017116446618752355,
+        "assignment": "triangle with maximum summed source vertex skin weight",
+        "note": "This measures ideal rigid bone deformation against the GLB skin reference before Bedrock runtime serialization. It proves the current rigid projection is not exact for this GLB; it does not measure runtime Euler-animation serialization error."
+      },
+      "exporter_status": "candidate exporter committed as plugins/haraganzito_bedrock_exporter.js; runtime not validated"
     },
     {
       "id": "china_polymesh_skeleton_animation",
@@ -130,5 +149,10 @@
       "that the native Blockbench weighted Armature representation survives Bedrock geometry export unchanged"
     ],
     "engineering_decision": "Preserve full skinning natively first; treat standard vanilla poly_mesh as a lossy output boundary until a runtime-compatible weighted representation is proven."
+  },
+  "tooling": {
+    "iterator_rigid_mapping_commit": "ec218f1a5736215d915fa0f7f518b6e27f5ff0dc",
+    "native_intermediate_retention_commit": "7934321c55821cce36623654d41dcd01fe631f5c",
+    "bedrock_candidate_exporter_commit": "0c6d8bd15b64879435e4692e93c7d26d47da2426"
   }
 }
