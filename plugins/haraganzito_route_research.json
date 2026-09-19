@@ -179,6 +179,7 @@
     "native_intermediate_retention_commit": "7934321c55821cce36623654d41dcd01fe631f5c",
     "bedrock_candidate_exporter_commit": "0c6d8bd15b64879435e4692e93c7d26d47da2426",
     "calibrated_static_route_commit": "f9c1a55cef155fbf879b1adebc401494b61ee9ca",
-    "calibration_report": "haraganzito_static_bones_calibration_report.json"
+    "calibration_report": "haraganzito_static_bones_calibration_report.json",
+    "world_rigid_v2_commit": "bc7c8628aafcb4ddd7a05dad7ef0df73814bf106"
   }
 }
