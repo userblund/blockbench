@@ -73,6 +73,12 @@
     });
     mesh.addTo(armature);
 
+    const localTransform = armature.haraganzito_mesh_trs;
+    if (localTransform) {
+      mesh.origin = [...localTransform.position];
+      mesh.rotation = quaternionToEuler(localTransform.rotation);
+    }
+
     const vertexKeys = new Array(positions.length);
     for (let i = 0; i < positions.length; i++) {
       vertexKeys[i] = mesh.addVertices(positions[i])[0];
@@ -117,23 +123,90 @@
     return {mesh, vertexKeys};
   }
 
+  function composeNodeMatrix(node) {
+    const local = node?.local || {};
+    const matrix = new THREE.Matrix4();
+    const position = new THREE.Vector3().fromArray(local.translation || [0, 0, 0]);
+    const quaternion = new THREE.Quaternion().fromArray(local.rotation || [0, 0, 0, 1]).normalize();
+    const scale = new THREE.Vector3().fromArray(local.scale || [1, 1, 1]);
+    matrix.compose(position, quaternion, scale);
+    if (Array.isArray(local.matrix)) {
+      matrix.fromArray(local.matrix);
+    }
+    return matrix;
+  }
+
+  function buildWorldMatrixResolver(intermediate) {
+    const cache = new Map();
+    function world(nodeIndex) {
+      if (cache.has(nodeIndex)) return cache.get(nodeIndex).clone();
+      const node = intermediate.nodes[nodeIndex];
+      if (!node) throw new Error('HARAGANZITO_NODE_NOT_FOUND:' + nodeIndex);
+      const local = composeNodeMatrix(node);
+      const result = node.parent == null ? local : world(node.parent).multiply(local);
+      cache.set(nodeIndex, result.clone());
+      return result;
+    }
+    return world;
+  }
+
+  function findLowestCommonAncestor(intermediate, a, b) {
+    const ancestors = new Set();
+    let cursor = a;
+    while (cursor != null) {
+      ancestors.add(cursor);
+      cursor = intermediate.nodes[cursor]?.parent ?? null;
+    }
+    cursor = b;
+    while (cursor != null) {
+      if (ancestors.has(cursor)) return cursor;
+      cursor = intermediate.nodes[cursor]?.parent ?? null;
+    }
+    return null;
+  }
+
+  function matrixToTRS(matrix) {
+    const position = new THREE.Vector3();
+    const quaternion = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    matrix.decompose(position, quaternion, scale);
+    return {position, quaternion, scale};
+  }
+
   function buildArmature(intermediate, skin) {
-    const skeletonNode = skin.skeleton != null ? intermediate.nodes?.[skin.skeleton] : null;
+    const meshNodeIndex = intermediate.nodes.findIndex(node => node.mesh === 0);
+    const skeletonRootIndex = skin.skeleton != null ? skin.skeleton : skin.joints[0];
+    if (meshNodeIndex < 0 || skeletonRootIndex == null) {
+      throw new Error('HARAGANZITO_CANNOT_LOCATE_SKIN_CONTAINER');
+    }
+
+    const world = buildWorldMatrixResolver(intermediate);
+    const containerNodeIndex = findLowestCommonAncestor(intermediate, meshNodeIndex, skeletonRootIndex);
+    if (containerNodeIndex == null) {
+      throw new Error('HARAGANZITO_NO_COMMON_SKIN_CONTAINER');
+    }
+
+    const containerWorld = world(containerNodeIndex);
+    const meshWorld = world(meshNodeIndex);
+    const meshLocalToContainer = containerWorld.clone().invert().multiply(meshWorld);
 
     const armature = new Armature({
-      name: skeletonNode?.name || 'HaraganzitoArmature'
+      name: intermediate.nodes[containerNodeIndex]?.name || 'HaraganzitoArmature'
     });
     armature.addTo(Outliner.ROOT);
     armature.init();
 
-    if (skeletonNode) {
-      const armatureMesh = armature.scene_object;
-      const local = skeletonNode.local || {};
-      armatureMesh.position.fromArray(local.translation || [0, 0, 0]);
-      armatureMesh.quaternion.fromArray(local.rotation || [0, 0, 0, 1]).normalize();
-      armatureMesh.scale.fromArray(local.scale || [1, 1, 1]);
-      armatureMesh.updateMatrixWorld(true);
-    }
+    const armatureTRS = matrixToTRS(containerWorld);
+    armature.scene_object.position.copy(armatureTRS.position);
+    armature.scene_object.quaternion.copy(armatureTRS.quaternion);
+    armature.scene_object.scale.copy(armatureTRS.scale);
+    armature.scene_object.updateMatrixWorld(true);
+
+    const meshTRS = matrixToTRS(meshLocalToContainer);
+    armature.haraganzito_mesh_local_transform = meshLocalToContainer.toArray();
+    armature.haraganzito_container_node_index = containerNodeIndex;
+    armature.haraganzito_mesh_node_index = meshNodeIndex;
+    armature.haraganzito_container_world_matrix = containerWorld.toArray();
 
     const boneMap = new Map();
 
@@ -178,19 +251,36 @@
     for (const rootIndex of jointRoots) createBoneRecursive(rootIndex, armature);
 
     /*
-     * ArmatureBone.init() calculates its own inverse bind matrix. Replace it
-     * with the actual GLB inverse bind matrix after hierarchy creation.
+     * Blockbench's native Armature deformation works in Armature-local
+     * coordinates. The GLB inverse-bind matrices are defined against the
+     * scene/global skin coordinate. Folding the common container transform
+     * into the Blockbench Armature therefore requires:
+     *
+     *     IBM_native = IBM_gltf * inverse(ContainerWorld)
+     *
+     * for the common-container case used by this importer.
      */
+    const containerInverse = containerWorld.clone().invert();
     for (let i = 0; i < skin.joints.length; i++) {
       const nodeIndex = skin.joints[i];
       const bone = boneMap.get(nodeIndex);
-      const ibm = skin.inverseBindMatrices?.[i];
-      if (bone && ibm && bone.scene_object?.inverse_bind_matrix) {
-        bone.scene_object.inverse_bind_matrix.fromArray(ibm);
+      const ibmArray = skin.inverseBindMatrices?.[i];
+      if (bone && ibmArray && bone.scene_object?.inverse_bind_matrix) {
+        const ibm = new THREE.Matrix4().fromArray(ibmArray);
+        const nativeIBM = ibm.clone().multiply(containerInverse);
+        bone.scene_object.inverse_bind_matrix.copy(nativeIBM);
+
+        bone.haraganzito_source_inverse_bind_matrix = clone(ibmArray);
+        bone.haraganzito_native_inverse_bind_matrix = nativeIBM.toArray();
       }
     }
 
     armature.haraganzito_bone_map = boneMap;
+    armature.haraganzito_mesh_trs = {
+      position: meshTRS.position.toArray(),
+      rotation: meshTRS.quaternion.toArray(),
+      scale: meshTRS.scale.toArray()
+    };
     return armature;
   }
 
