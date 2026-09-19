@@ -215,6 +215,101 @@
    * It is intentionally a neutral intermediate representation. It is NOT
    * emitted as a vanilla Bedrock .geo.json file.
    */
+  function glbIntermediateToRouteInput(glb) {
+    if (!glb || !Array.isArray(glb.meshes) || !Array.isArray(glb.nodes)) {
+      throw new Error('HARAGANZITO_INVALID_GLB_INTERMEDIATE');
+    }
+
+    const primitive = glb.meshes[0]?.primitives[0];
+    if (!primitive) throw new Error('HARAGANZITO_NO_FIRST_PRIMITIVE');
+
+    const positions = primitive.attributes.POSITION || [];
+    const normals = primitive.attributes.NORMAL || [];
+    const uvs = primitive.attributes.TEXCOORD_0 || [];
+    const joints = primitive.attributes.JOINTS_0 || [];
+    const weights = primitive.attributes.WEIGHTS_0 || [];
+    const indices = primitive.indices || [];
+
+    const skin = glb.skins[0] || null;
+    const bones = (skin?.joints || []).map((nodeIndex, boneIndex) => {
+      const node = glb.nodes[nodeIndex];
+      const inverseBindMatrix = skin.inverseBindMatrices?.[boneIndex] || null;
+      return {
+        index: boneIndex,
+        nodeIndex,
+        name: node?.name || ('bone_' + boneIndex),
+        parent: node?.parent != null ? glb.nodes[node.parent]?.name || null : null,
+        position: node?.local?.translation || [0,0,0],
+        quaternion: node?.local?.rotation || [0,0,0,1],
+        scale: node?.local?.scale || [1,1,1],
+        inverseBindMatrix
+      };
+    });
+
+    const boneIndexToName = bones.map(b => b.name);
+    const vertices = positions.map((position, index) => ({
+      id: index,
+      position: [...position],
+      normal: [...(normals[index] || [0,1,0])],
+      uv: [...(uvs[index] || [0,0])],
+      joints: [...(joints[index] || [])],
+      weights: [...(weights[index] || [])].map((weight, j) => ({
+        bone: joints[index]?.[j] ?? 0,
+        boneName: boneIndexToName[joints[index]?.[j] ?? 0] || null,
+        weight
+      }))
+    }));
+
+    const polygons = [];
+    for (let i = 0; i + 2 < indices.length; i += 3) {
+      polygons.push([
+        [indices[i], indices[i+1], indices[i+2]]
+      ]);
+    }
+
+    const tracks = [];
+    for (const animation of glb.animations || []) {
+      for (const channel of animation.channels || []) {
+        const sampler = animation.samplers[channel.sampler];
+        const targetBone = bones.find(b => b.nodeIndex === channel.targetNode);
+        if (!sampler || !targetBone) continue;
+        const keyframes = sampler.input.map((time, k) => ({
+          time,
+          position: channel.path === 'translation' ? (sampler.output[k] || [0,0,0]) : [0,0,0],
+          quaternion: channel.path === 'rotation' ? (sampler.output[k] || [0,0,0,1]) : [0,0,0,1],
+          scale: channel.path === 'scale' ? (sampler.output[k] || [1,1,1]) : [1,1,1]
+        }));
+        tracks.push({
+          animation: animation.name,
+          bone: targetBone.name,
+          path: channel.path,
+          interpolation: sampler.interpolation,
+          channelMask: channel.path === 'translation' ? 1 : channel.path === 'rotation' ? 2 : channel.path === 'scale' ? 4 : 0,
+          keyframes
+        });
+      }
+    }
+
+    const animationMap = new Map();
+    for (const track of tracks) {
+      if (!animationMap.has(track.animation)) animationMap.set(track.animation, []);
+      animationMap.get(track.animation).push(track);
+    }
+
+    return {
+      vertices,
+      bones,
+      polygons,
+      materialPath: glb.textures?.[0]?.name || null,
+      animations: (glb.animations || []).map(animation => ({
+        name: animation.name,
+        id: animation.index,
+        length: Math.max(0, ...animation.samplers.flatMap(s => s.input || [])),
+        tracks: animationMap.get(animation.name) || []
+      }))
+    };
+  }
+
   function buildChinaReferenceCandidate(intermediate) {
     if (!intermediate || !Array.isArray(intermediate.vertices)) {
       throw new Error('HARAGANZITO_NO_INTERMEDIATE_VERTICES');
@@ -345,6 +440,7 @@
         classifyIteration,
         recordIteration,
         buildChinaReferenceCandidate,
+        glbIntermediateToRouteInput,
         search
       };
       console.log('[HaraganzitoIterator] v' + VERSION + ' loaded');
