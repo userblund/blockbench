@@ -99,7 +99,16 @@
       "purpose": "Preserve the complete GLB skin inside Blockbench before Bedrock serialization.",
       "animated": true,
       "skinning_mode": "4_influences_per_vertex",
-      "runtime_status": "not_determined"
+      "runtime_status": "not_determined",
+      "validation": {
+        "checked_glb": "rigged-model.glb",
+        "vertices": 33486,
+        "joints": 22,
+        "animations": 6,
+        "maxAbsoluteVertexError": 5.141863423929749e-8,
+        "aggregateSquaredError": null,
+        "note": "Vertex-level native deformation matches the GLB reference within measured floating-point error; scale bind pose and multiplicative scale animation are preserved by the importer."
+      }
     }
   ],
   "conclusion": {
@@ -109,13 +118,16 @@
       "Blockbench issue #2706 documents a separate China polymesh+skeleton+animation format with per-vertex weights",
       "the current documented vanilla poly_mesh schema exposes no per-vertex skin-weight field",
       "Meshy serializes poly_mesh geometry as positions/normals/uvs/polys and does not serialize GLB JOINTS/WEIGHTS/inverse-bind data",
-      "Blockbench native ArmatureBone stores per-vertex weights and inverse-bind data, so a loss-preserving intermediate representation exists before Bedrock serialization"
+      "Blockbench native ArmatureBone stores per-vertex weights and inverse-bind data, so a loss-preserving intermediate representation exists before Bedrock serialization",
+      "Blockbench Armature.calculateVertexDeformation can reproduce the GLB skin deformation formula when the GLB common skin container is kept as an external Group and the native Armature is identity beneath it",
+      "A full vertex-level comparison against the Haraganzito GLB gives maximum absolute position error 5.141863423929749e-8 across sampled animation times, consistent with floating-point arithmetic rather than representational loss"
     ],
     "not_proven": [
       "China reference format loads in normal vanilla Bedrock",
       "vanilla Bedrock poly_mesh directly supports arbitrary per-vertex GLB skin weights",
       "any single conversion route is exact",
-      "that native Blockbench weighted skinning can be serialized into a vanilla Bedrock runtime representation without loss"
+      "that native Blockbench weighted skinning can be serialized into a vanilla Bedrock runtime representation without loss",
+      "that the native Blockbench weighted Armature representation survives Bedrock geometry export unchanged"
     ],
     "engineering_decision": "Preserve full skinning natively first; treat standard vanilla poly_mesh as a lossy output boundary until a runtime-compatible weighted representation is proven."
   }
