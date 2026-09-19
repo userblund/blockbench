@@ -310,6 +310,157 @@
     };
   }
 
+
+  function dominantBone(value, vertexIndex) {
+    const weights = value?.weights || [];
+    let best = 0;
+    let bestWeight = -Infinity;
+    for (let i = 0; i < weights.length; i++) {
+      if ((weights[i]?.weight ?? 0) > bestWeight) {
+        bestWeight = weights[i].weight ?? 0;
+        best = weights[i].bone ?? 0;
+      }
+    }
+    return best;
+  }
+
+  /*
+   * Candidate generator A1:
+   * Convert the GLB mesh to Bedrock poly_mesh, split polygons by their
+   * dominant bone, and attach each resulting mesh to that bone.
+   *
+   * This is deliberately a rigid-skin candidate. It is not claimed exact.
+   * The iterator can compare it and move to a different representation.
+   */
+  function buildRigidPolyMeshCandidate(intermediate, options = {}) {
+    const source = glbIntermediateToRouteInput(intermediate);
+    const flipX = options.flipX !== false;
+    const bones = source.bones || [];
+    const geometryBones = bones.map(bone => ({
+      name: bone.name,
+      parent: bone.parent,
+      pivot: [...bone.position],
+      poly_mesh: {
+        normalized_uvs: true,
+        positions: [],
+        normals: [],
+        uvs: [],
+        polys: []
+      }
+    }));
+
+    const primitive = intermediate.meshes[0]?.primitives[0];
+    const positions = primitive?.attributes?.POSITION || [];
+    const normals = primitive?.attributes?.NORMAL || [];
+    const uvs = primitive?.attributes?.TEXCOORD_0 || [];
+    const weights = primitive?.attributes?.WEIGHTS_0 || [];
+    const joints = primitive?.attributes?.JOINTS_0 || [];
+    const indices = primitive?.indices || [];
+
+    function position(i) {
+      const p = [...positions[i]];
+      if (flipX) p[0] *= -1;
+      return p;
+    }
+
+    const maps = new Map();
+
+    function addVertex(boneIndex, sourceIndex) {
+      const key = boneIndex + ':' + sourceIndex;
+      if (!maps.has(key)) {
+        const b = geometryBones[boneIndex];
+        const pm = b.poly_mesh;
+        const newIndex = pm.positions.length;
+        maps.set(key, newIndex);
+        pm.positions.push(position(sourceIndex));
+        pm.normals.push([...(normals[sourceIndex] || [0,1,0])]);
+        const uv = [...(uvs[sourceIndex] || [0,0])];
+        pm.uvs.push(uv);
+      }
+      return maps.get(key);
+    }
+
+    let polygonCount = 0;
+    for (let i = 0; i + 2 < indices.length; i += 3) {
+      const a = indices[i], b = indices[i+1], c = indices[i+2];
+      const da = dominantBone({weights: weights[a], joints: joints[a]}, a);
+      const db = dominantBone({weights: weights[b], joints: joints[b]}, b);
+      const dc = dominantBone({weights: weights[c], joints: joints[c]}, c);
+      // A triangle cannot belong to three different rigid bones without
+      // changing its deformation model. Assign it to the strongest vertex
+      // influence and record that this is a lossy rigid approximation.
+      const counts = new Map();
+      for (const bone of [da, db, dc]) counts.set(bone, (counts.get(bone) || 0) + 1);
+      let targetBone = da;
+      for (const [bone, count] of counts) {
+        if (count > (counts.get(targetBone) || 0)) targetBone = bone;
+      }
+      if (!geometryBones[targetBone]) continue;
+      const pm = geometryBones[targetBone].poly_mesh;
+      const poly = [
+        [addVertex(targetBone, a), 0, addVertex(targetBone, a)],
+        [addVertex(targetBone, b), 1, addVertex(targetBone, b)],
+        [addVertex(targetBone, c), 2, addVertex(targetBone, c)],
+      ];
+      pm.polys.push(poly);
+      polygonCount++;
+    }
+
+    const animationFiles = (intermediate.animations || []).map(animation => {
+      const bonesOut = {};
+      for (const channel of animation.channels || []) {
+        const sampler = animation.samplers[channel.sampler];
+        const targetNode = channel.targetNode;
+        const bone = source.bones.find(b => b.nodeIndex === targetNode);
+        if (!bone || !sampler) continue;
+        if (!bonesOut[bone.name]) bonesOut[bone.name] = {};
+        const values = sampler.input.map((time, k) => {
+          const value = sampler.output[k];
+          return {time, value};
+        });
+        const keyframes = values.map(k => [k.time, k.value]);
+        if (channel.path === 'translation') bonesOut[bone.name].position = keyframes;
+        if (channel.path === 'rotation') bonesOut[bone.name].rotation = keyframes;
+        if (channel.path === 'scale') bonesOut[bone.name].scale = keyframes;
+      }
+      return {
+        name: animation.name,
+        length: Math.max(0, ...animation.samplers.flatMap(s => s.input || [])),
+        bones: bonesOut
+      };
+    });
+
+    return {
+      schema:'haraganzito.candidate.rigid_polymesh.v1',
+      route:'bedrock_rigid_poly_mesh_bones',
+      exact:false,
+      lossModel:{
+        skinning:'rigid_dominant_bone',
+        discardedContinuousWeights:true,
+        discardedWeightDetails:true
+      },
+      geometry:{
+        format_version:'1.21.0',
+        'minecraft:geometry':[{
+          description:{
+            identifier:'geometry.haraganzito_candidate',
+            texture_width:4096,
+            texture_height:4096
+          },
+          bones:geometryBones.filter(b => b.poly_mesh.polys.length || b.parent != null)
+        }]
+      },
+      animations:animationFiles,
+      diagnostics:{
+        sourceVertices:positions.length,
+        sourceTriangles:Math.floor(indices.length/3),
+        generatedTriangles:polygonCount,
+        bones:geometryBones.length,
+        flipX
+      }
+    };
+  }
+
   function buildChinaReferenceCandidate(intermediate) {
     if (!intermediate || !Array.isArray(intermediate.vertices)) {
       throw new Error('HARAGANZITO_NO_INTERMEDIATE_VERTICES');
@@ -441,6 +592,7 @@
         recordIteration,
         buildChinaReferenceCandidate,
         glbIntermediateToRouteInput,
+        buildRigidPolyMeshCandidate,
         search
       };
       console.log('[HaraganzitoIterator] v' + VERSION + ' loaded');
