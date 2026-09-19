@@ -187,7 +187,7 @@ const report={
     }
   },
   classification:{
-    rigidDominantBone:'not_exact_for_this_GLΒ',
+    rigidDominantBone:'not_exact_for_this_GLB',
     fullWeightedReference:'exact_reconstruction_in_the_reference_representation',
     vanillaBedrockRuntimeSupport:'not_determined_by_this_tool'
   }
