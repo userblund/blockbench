@@ -14,7 +14,7 @@
     author: 'userblund',
     description: 'Ground-truth and iterative bridge foundation for rigged GLB -> Bedrock.',
     icon: 'icon-import',
-    version: '0.4.0'
+    version: '0.5.0'
   };
 
   function analyzeGLTFDocument(gltf) {
@@ -88,7 +88,7 @@
     const bones = armature.getAllBones();
     const meshes = armature.children.filter(child => child instanceof Mesh);
     const result = {
-      schema: 'haraganzito.skinning.intermediate.v1',
+      schema: 'haraganzito.skinning.intermediate.v2',
       armature: {name: armature.name, uuid: armature.uuid},
       bones: bones.map((bone, index) => ({
         index,
@@ -107,7 +107,8 @@
         uuid: mesh.uuid,
         name: mesh.name,
         vertices: Object.keys(mesh.vertices || {}).length,
-        weights: {}
+        weights: {},
+      sourceWeightingPreserved: true
       };
       for (const vkey of Object.keys(mesh.vertices || {})) {
         const influences = [];
@@ -116,12 +117,24 @@
           if (weight > 0) influences.push({bone: i, weight});
         }
         influences.sort((a, b) => b.weight - a.weight);
-        const top4 = influences.slice(0, 4);
-        const sum = top4.reduce((s, x) => s + x.weight, 0);
-        if (sum > 0) {
-          top4.forEach(x => x.weight /= sum);
+        const originalSum = influences.reduce((s, x) => s + x.weight, 0);
+        const allInfluences = influences.map(x => ({bone: x.bone, weight: x.weight}));
+
+        // Keep the complete source weighting. A top-4 projection is only a
+        // candidate representation and must never overwrite the ground truth.
+        const top4 = influences.slice(0, 4).map(x => ({bone: x.bone, weight: x.weight}));
+        const top4Sum = top4.reduce((s, x) => s + x.weight, 0);
+        if (top4Sum > 0) {
+          top4.forEach(x => x.weight /= top4Sum);
         }
-        meshRecord.weights[vkey] = top4;
+
+        meshRecord.weights[vkey] = {
+          all: allInfluences,
+          top4Normalized: top4,
+          originalSum,
+          discardedInfluenceWeight: Math.max(0, originalSum - top4Sum),
+          influenceCount: influences.length
+        };
       }
       result.meshes.push(meshRecord);
     }
@@ -142,15 +155,24 @@
     };
     for (const mesh of (manifest.meshes || [])) {
       for (const key of Object.keys(mesh.weights || {})) {
-        const influences = mesh.weights[key];
+        const record = mesh.weights[key];
+        const influences = Array.isArray(record) ? record : (record?.all || []);
         result.vertices++;
         if (influences.length) result.verticesWithWeights++;
         result.maxInfluences = Math.max(result.maxInfluences, influences.length);
         const sum = influences.reduce((s, x) => s + x.weight, 0);
         result.weightSumErrorMax = Math.max(result.weightSumErrorMax, Math.abs(sum - (influences.length ? 1 : 0)));
         if (influences.length > 4) {
+          result.warnings.push({mesh: mesh.name, vertex: key, reason: 'more_than_4_influences'});
+        }
+        if (!Array.isArray(record) && record && record.discardedInfluenceWeight > 0) {
           result.exact = false;
-          result.errors.push({mesh: mesh.name, vertex: key, reason: 'more_than_4_influences'});
+          result.errors.push({
+            mesh: mesh.name,
+            vertex: key,
+            reason: 'candidate_projection_discards_weight',
+            discardedInfluenceWeight: record.discardedInfluenceWeight
+          });
         }
       }
     }
@@ -202,7 +224,7 @@
           }
         }
       };
-      console.log('[HaraganzitoBridge] v0.1.0 loaded');
+      console.log('[HaraganzitoBridge] v' + plugin.version + ' loaded');
     },
     onunload() {
       delete window.HaraganzitoBridge;
