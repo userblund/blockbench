@@ -14,7 +14,7 @@
     author: 'userblund',
     description: 'Ground-truth and iterative bridge foundation for rigged GLB -> Bedrock.',
     icon: 'icon-import',
-    version: '0.2.0'
+    version: '0.3.0'
   };
 
   function analyzeGLTFDocument(gltf) {
@@ -81,6 +81,82 @@
     return report;
   }
 
+  function captureArmatureSkinning(armature) {
+    if (!armature || typeof armature.getAllBones !== 'function') {
+      throw new Error('HARAGANZITO_NO_ARMATURE');
+    }
+    const bones = armature.getAllBones();
+    const meshes = armature.children.filter(child => child instanceof Mesh);
+    const result = {
+      schema: 'haraganzito.skinning.intermediate.v1',
+      armature: {name: armature.name, uuid: armature.uuid},
+      bones: bones.map((bone, index) => ({
+        index,
+        uuid: bone.uuid,
+        name: bone.name,
+        parent: bone.parent && bone.parent.name ? bone.parent.name : null,
+        origin: Array.from(bone.origin || []),
+        rotation: Array.from(bone.rotation || []),
+        vertex_weights: {}
+      })),
+      meshes: []
+    };
+
+    for (const mesh of meshes) {
+      const meshRecord = {
+        uuid: mesh.uuid,
+        name: mesh.name,
+        vertices: Object.keys(mesh.vertices || {}).length,
+        weights: {}
+      };
+      for (const vkey of Object.keys(mesh.vertices || {})) {
+        const influences = [];
+        for (let i = 0; i < bones.length; i++) {
+          const weight = bones[i].getVertexWeight(mesh, vkey);
+          if (weight > 0) influences.push({bone: i, weight});
+        }
+        influences.sort((a, b) => b.weight - a.weight);
+        const top4 = influences.slice(0, 4);
+        const sum = top4.reduce((s, x) => s + x.weight, 0);
+        if (sum > 0) {
+          top4.forEach(x => x.weight /= sum);
+        }
+        meshRecord.weights[vkey] = top4;
+      }
+      result.meshes.push(meshRecord);
+    }
+
+    return result;
+  }
+
+  function validateSkinningManifest(manifest) {
+    const result = {
+      schema: 'haraganzito.skinning.validation.v1',
+      exact: true,
+      errors: [],
+      warnings: [],
+      vertices: 0,
+      verticesWithWeights: 0,
+      maxInfluences: 0,
+      weightSumErrorMax: 0
+    };
+    for (const mesh of (manifest.meshes || [])) {
+      for (const key of Object.keys(mesh.weights || {})) {
+        const influences = mesh.weights[key];
+        result.vertices++;
+        if (influences.length) result.verticesWithWeights++;
+        result.maxInfluences = Math.max(result.maxInfluences, influences.length);
+        const sum = influences.reduce((s, x) => s + x.weight, 0);
+        result.weightSumErrorMax = Math.max(result.weightSumErrorMax, Math.abs(sum - (influences.length ? 1 : 0)));
+        if (influences.length > 4) {
+          result.exact = false;
+          result.errors.push({mesh: mesh.name, vertex: key, reason: 'more_than_4_influences'});
+        }
+      }
+    }
+    return result;
+  }
+
   BBPlugin.register('haraganzito_bridge', {
     title: plugin.title,
     author: plugin.author,
@@ -93,6 +169,8 @@
         version: plugin.version,
         status: 'experimental_bridge',
         analyzeGLTFDocument,
+        captureArmatureSkinning,
+        validateSkinningManifest,
         metricDefinition: {
           geometry: 'sum_i ||v_source(i)-v_candidate(i)||^2',
           animation: 'sum_t sum_i ||v_source(i,t)-v_candidate(i,t)||^2',
