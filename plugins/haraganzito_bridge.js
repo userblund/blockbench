@@ -14,7 +14,7 @@
     author: 'userblund',
     description: 'Ground-truth and iterative bridge foundation for rigged GLB -> Bedrock.',
     icon: 'icon-import',
-    version: '0.3.0'
+    version: '0.4.0'
   };
 
   function analyzeGLTFDocument(gltf) {
@@ -157,6 +157,26 @@
     return result;
   }
 
+  function compareIterations(previous, current) {
+    const p = previous || {};
+    const c = current || {};
+    const fields = ['geometry', 'skinning', 'animation', 'materials', 'uv'];
+    const delta = {};
+    let improved = false;
+    for (const field of fields) {
+      const before = Number.isFinite(p[field]) ? p[field] : null;
+      const after = Number.isFinite(c[field]) ? c[field] : null;
+      delta[field] = {before, after, improvement: before !== null && after !== null ? before - after : null};
+      if (delta[field].improvement !== null && delta[field].improvement > 0) improved = true;
+    }
+    return {
+      schema: 'haraganzito.iteration.v1',
+      improved,
+      exact: fields.every(field => c[field] === 0),
+      delta
+    };
+  }
+
   BBPlugin.register('haraganzito_bridge', {
     title: plugin.title,
     author: plugin.author,
@@ -171,6 +191,7 @@
         analyzeGLTFDocument,
         captureArmatureSkinning,
         validateSkinningManifest,
+        compareIterations,
         metricDefinition: {
           geometry: 'sum_i ||v_source(i)-v_candidate(i)||^2',
           animation: 'sum_t sum_i ||v_source(i,t)-v_candidate(i,t)||^2',
