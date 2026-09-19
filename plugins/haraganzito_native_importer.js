@@ -253,6 +253,15 @@
       bone.haraganzito_source_bone_index = boneIndex;
       bone.haraganzito_source_rotation_quaternion = clone(local.rotation || [0, 0, 0, 1]);
       bone.haraganzito_source_scale = clone(local.scale || [1, 1, 1]);
+
+      /*
+       * ArmatureBone does not expose scale as a normal editing property, but
+       * its THREE scene object does. Preserve the GLB bind-pose scale here so
+       * that animation scale can be represented as a multiplicative ratio.
+       */
+      bone.scene_object.scale.fromArray(local.scale || [1, 1, 1]);
+      bone.scene_object.updateMatrixWorld(true);
+
       boneMap.set(nodeIndex, bone);
 
       for (const childIndex of node.children || []) {
@@ -414,10 +423,16 @@
             const delta = relativeQuaternionEuler(base.rotation, value);
             result = {x: delta[0], y: delta[1], z: delta[2]};
           } else if (channel.path === 'scale') {
+            /*
+             * Blockbench BoneAnimator.displayScale() is multiplicative.
+             * The imported bind pose already contains the GLB base scale, so
+             * the animation channel must contain value/base rather than the
+             * absolute GLB scale.
+             */
             result = {
-              x: value[0] ?? 1,
-              y: value[1] ?? 1,
-              z: value[2] ?? 1
+              x: (value[0] ?? 1) / (base.scale[0] ?? 1),
+              y: (value[1] ?? 1) / (base.scale[1] ?? 1),
+              z: (value[2] ?? 1) / (base.scale[2] ?? 1)
             };
           } else {
             return null;
@@ -456,7 +471,7 @@
         name: sourceAnimation.name,
         length: Math.max(0, ...sourceAnimation.samplers.flatMap(s => s.input || [])),
         loop: 'once',
-        override: true,
+        override: false,
         animators
       }).add();
 
