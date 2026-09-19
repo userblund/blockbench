@@ -14,7 +14,7 @@
     author: 'userblund',
     description: 'Ground-truth and iterative bridge foundation for rigged GLB -> Bedrock.',
     icon: 'icon-import',
-    version: '0.1.0'
+    version: '0.2.0'
   };
 
   function analyzeGLTFDocument(gltf) {
@@ -91,6 +91,7 @@
     onload() {
       window.HaraganzitoBridge = {
         version: plugin.version,
+        status: 'experimental_bridge',
         analyzeGLTFDocument,
         metricDefinition: {
           geometry: 'sum_i ||v_source(i)-v_candidate(i)||^2',
