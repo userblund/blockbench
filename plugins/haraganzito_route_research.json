@@ -29,7 +29,9 @@
         "polys"
       ],
       "animation_model": "Bones define the skeleton; animation files refer to bones by name.",
-      "current_status": "poly_mesh is documented as deprecated/restricted."
+      "current_status": "poly_mesh is documented as deprecated/restricted.",
+      "weight_field_present": false,
+      "validation_rule": "GEOFMT101: Restricted Poly Mesh"
     },
     "china_polymesh_reference": {
       "source": "https://github.com/JannisX11/blockbench/issues/2706",
@@ -43,6 +45,17 @@
       "skeleton_bone_transforms": true,
       "animation_tracks": true,
       "direct_glb_mapping_hypothesis": "strong structural correspondence, requires runtime/export validation"
+    },
+    "blockbench_meshy": {
+      "source": "https://github.com/Shadowkitten47/Meshy",
+      "output_fields": [
+        "positions",
+        "normals",
+        "uvs",
+        "polys"
+      ],
+      "preserves_vertex_weights": false,
+      "preserves_inverse_bind_matrices": false
     }
   },
   "routes": [
@@ -57,7 +70,8 @@
       "family": "bedrock_normal",
       "purpose": "test whether poly_mesh attached to animated bones is sufficient",
       "animated": true,
-      "skinning_mode": "rigid_per_bone"
+      "skinning_mode": "rigid_per_bone",
+      "diagnostic": "Exact continuous skinning is not representable by the documented vanilla poly_mesh schema when vertices have multiple nonzero influences; this route is retained only as a measured rigid approximation."
     },
     {
       "id": "china_polymesh_skeleton_animation",
@@ -78,19 +92,31 @@
       "purpose": "fallback exploration when native continuous skinning cannot be represented",
       "animated": true,
       "warning": "not equivalent to native continuous skinning unless the runtime representation itself is proven equivalent"
+    },
+    {
+      "id": "native_blockbench_weighted_armature",
+      "family": "blockbench_native_skinning",
+      "purpose": "Preserve the complete GLB skin inside Blockbench before Bedrock serialization.",
+      "animated": true,
+      "skinning_mode": "4_influences_per_vertex",
+      "runtime_status": "not_determined"
     }
   ],
   "conclusion": {
     "proven": [
       "vanilla Bedrock documents poly_mesh",
       "vanilla Bedrock documents animated bones",
-      "Blockbench issue #2706 documents a separate China polymesh+skeleton+animation format with per-vertex weights"
+      "Blockbench issue #2706 documents a separate China polymesh+skeleton+animation format with per-vertex weights",
+      "the current documented vanilla poly_mesh schema exposes no per-vertex skin-weight field",
+      "Meshy serializes poly_mesh geometry as positions/normals/uvs/polys and does not serialize GLB JOINTS/WEIGHTS/inverse-bind data",
+      "Blockbench native ArmatureBone stores per-vertex weights and inverse-bind data, so a loss-preserving intermediate representation exists before Bedrock serialization"
     ],
     "not_proven": [
       "China reference format loads in normal vanilla Bedrock",
       "vanilla Bedrock poly_mesh directly supports arbitrary per-vertex GLB skin weights",
-      "any single conversion route is exact"
+      "any single conversion route is exact",
+      "that native Blockbench weighted skinning can be serialized into a vanilla Bedrock runtime representation without loss"
     ],
-    "engineering_decision": "Do not choose one route in advance. The iterator must test multiple representations and retain every measured result."
+    "engineering_decision": "Preserve full skinning natively first; treat standard vanilla poly_mesh as a lossy output boundary until a runtime-compatible weighted representation is proven."
   }
 }
