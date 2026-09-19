@@ -318,6 +318,40 @@
   }
 
 
+  /*
+   * The documented vanilla poly_mesh schema has geometry fields but no
+   * per-vertex JOINTS/WEIGHTS representation. This report turns that
+   * representational fact into a deterministic route diagnostic.
+   */
+  function assessVanillaSkinningRepresentability(intermediate) {
+    const primitive = intermediate.meshes?.[0]?.primitives?.[0];
+    const weights = primitive?.attributes?.WEIGHTS_0 || [];
+    let multiInfluenceVertices = 0;
+    let maxInfluences = 0;
+
+    for (const row of weights) {
+      const influences = row.filter(weight => Number(weight) !== 0).length;
+      maxInfluences = Math.max(maxInfluences, influences);
+      if (influences > 1) multiInfluenceVertices++;
+    }
+
+    return {
+      schema: 'haraganzito.vanilla_poly_mesh.representability.v1',
+      documentedPolyMeshFields: ['normalized_uvs', 'positions', 'normals', 'uvs', 'polys'],
+      supportsPerVertexSkinWeights: false,
+      vertices: weights.length,
+      multiInfluenceVertices,
+      maxInfluences,
+      exactContinuousSkinning: multiInfluenceVertices === 0,
+      classification: multiInfluenceVertices === 0
+        ? 'not_blocked_by_weight_representation'
+        : 'representation_loss_required_for_vanilla_poly_mesh',
+      reason: multiInfluenceVertices === 0
+        ? 'Every source vertex is rigidly influenced.'
+        : 'The documented vanilla poly_mesh schema cannot encode multiple continuous vertex influences.'
+    };
+  }
+
   function dominantBone(value, vertexIndex) {
     const weights = value?.weights || [];
     let best = 0;
@@ -742,6 +776,7 @@
         compareErrors,
         classifyIteration,
         recordIteration,
+        assessVanillaSkinningRepresentability,
         buildNativeBlockbenchWeightedArmatureCandidate,
         buildChinaReferenceCandidate,
         glbIntermediateToRouteInput,
