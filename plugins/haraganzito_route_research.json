@@ -1,0 +1,96 @@
+{
+  "schema": "haraganzito.research.route-capabilities.v1",
+  "updated": "2026-09-19",
+  "goal": "Find a representation path that can reproduce an animated GLB in an animated Minecraft Bedrock addon with zero measured loss under the declared validation metric.",
+  "ground_truth": {
+    "source_format": "glTF 2.0 / GLB",
+    "required_data": [
+      "positions",
+      "normals",
+      "texcoords0",
+      "indices",
+      "joints0",
+      "weights0",
+      "inverseBindMatrices",
+      "skeletonHierarchy",
+      "animationTranslation",
+      "animationRotation",
+      "animationScale"
+    ]
+  },
+  "evidence": {
+    "vanilla_bedrock": {
+      "source": "https://learn.microsoft.com/en-us/minecraft/creator/reference/content/visualreference/geometry.v1.21.0?view=minecraft-bedrock-stable",
+      "poly_mesh_fields": [
+        "normalized_uvs",
+        "positions",
+        "normals",
+        "uvs",
+        "polys"
+      ],
+      "animation_model": "Bones define the skeleton; animation files refer to bones by name.",
+      "current_status": "poly_mesh is documented as deprecated/restricted."
+    },
+    "china_polymesh_reference": {
+      "source": "https://github.com/JannisX11/blockbench/issues/2706",
+      "status": "reference format, not yet proven as a vanilla Bedrock runtime format",
+      "components": [
+        "Polymesh",
+        "Skeleton",
+        "Animations"
+      ],
+      "polymesh_vertex_weight": true,
+      "skeleton_bone_transforms": true,
+      "animation_tracks": true,
+      "direct_glb_mapping_hypothesis": "strong structural correspondence, requires runtime/export validation"
+    }
+  },
+  "routes": [
+    {
+      "id": "bedrock_poly_mesh_static",
+      "family": "bedrock_normal",
+      "purpose": "baseline geometry/texturing candidate",
+      "animated": false
+    },
+    {
+      "id": "bedrock_rigid_poly_mesh_bones",
+      "family": "bedrock_normal",
+      "purpose": "test whether poly_mesh attached to animated bones is sufficient",
+      "animated": true,
+      "skinning_mode": "rigid_per_bone"
+    },
+    {
+      "id": "china_polymesh_skeleton_animation",
+      "family": "bedrock_china_reference",
+      "purpose": "test the richer polymesh+skeleton+animation representation",
+      "animated": true,
+      "skinning_mode": "per_vertex_weights"
+    },
+    {
+      "id": "hybrid_split_weighted_poly_mesh",
+      "family": "bedrock_normal_hybrid",
+      "purpose": "approximate continuous GLB skinning with bone-addressable geometry regions",
+      "animated": true
+    },
+    {
+      "id": "baked_pose_geometry_sequence",
+      "family": "bedrock_normal_baked",
+      "purpose": "fallback exploration when native continuous skinning cannot be represented",
+      "animated": true,
+      "warning": "not equivalent to native continuous skinning unless the runtime representation itself is proven equivalent"
+    }
+  ],
+  "conclusion": {
+    "proven": [
+      "vanilla Bedrock documents poly_mesh",
+      "vanilla Bedrock documents animated bones",
+      "Blockbench issue #2706 documents a separate China polymesh+skeleton+animation format with per-vertex weights"
+    ],
+    "not_proven": [
+      "China reference format loads in normal vanilla Bedrock",
+      "vanilla Bedrock poly_mesh directly supports arbitrary per-vertex GLB skin weights",
+      "any single conversion route is exact"
+    ],
+    "engineering_decision": "Do not choose one route in advance. The iterator must test multiple representations and retain every measured result."
+  }
+}
