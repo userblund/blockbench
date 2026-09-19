@@ -35,8 +35,8 @@
     };
   }
 
-  function makeManifest(name, description, uuid1, uuid2, moduleType, dependency) {
-    return {
+  function makeManifest(name, description, uuid1, uuid2, moduleType, dependencyUuid) {
+    const manifest = {
       format_version: 2,
       header: {
         name,
@@ -51,8 +51,17 @@
           uuid: uuid2,
           version: [1, 0, 0]
         }
-      ].concat(dependency ? [{type: 'data', uuid: dependency, version: [1, 0, 0]}] : [])
+      ]
     };
+    if (dependencyUuid) {
+      manifest.dependencies = [
+        {
+          uuid: dependencyUuid,
+          version: [1, 0, 0]
+        }
+      ];
+    }
+    return manifest;
   }
 
   function buildBehaviorPack() {
