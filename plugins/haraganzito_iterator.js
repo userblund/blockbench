@@ -11,7 +11,7 @@
 (function() {
   'use strict';
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.2.0';
 
   const ROUTES = [
     {
@@ -28,6 +28,7 @@
       preserves: ['positions', 'normals', 'texcoords0', 'indices', 'materials', 'skeletonHierarchy', 'animationTracks'],
       loses: ['arbitraryVertexWeights', 'inverseBindMatrices']
     },
+    {
     {
       id: 'native_blockbench_weighted_armature',
       family: 'blockbench_native_skinning',
