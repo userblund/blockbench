@@ -29,13 +29,13 @@
       loses: ['arbitraryVertexWeights', 'inverseBindMatrices']
     },
     {
-    {
       id: 'native_blockbench_weighted_armature',
       family: 'blockbench_native_skinning',
       description: 'Native Blockbench armature + mesh vertex weights + animation tracks, preserving the GLB skinning data before Bedrock serialization.',
       preserves: ['positions', 'normals', 'texcoords0', 'indices', 'materials', 'joints0', 'weights0', 'inverseBindMatrices', 'skeletonHierarchy', 'animationTracks'],
-      loses: [],
+      loses: []
     },
+    {
       id: 'china_polymesh_skeleton_animation',
       family: 'bedrock_china_reference',
       description: 'Polymesh + per-vertex bone weights + skeleton + animation tracks.',
