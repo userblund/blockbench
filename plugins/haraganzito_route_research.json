@@ -106,7 +106,7 @@
         "joints": 22,
         "animations": 6,
         "maxAbsoluteVertexError": 5.141863423929749e-8,
-        "aggregateSquaredError": null,
+        "aggregateSquaredError": 7.476761153346947e-9,
         "note": "Vertex-level native deformation matches the GLB reference within measured floating-point error; scale bind pose and multiplicative scale animation are preserved by the importer."
       }
     }
