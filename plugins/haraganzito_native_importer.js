@@ -51,6 +51,15 @@
     return texture;
   }
 
+  function maxMatrixIdentityError(matrix) {
+    const identity = new THREE.Matrix4();
+    const array = matrix.toArray();
+    const target = identity.toArray();
+    let error = 0;
+    for (let i = 0; i < 16; i++) error = Math.max(error, Math.abs(array[i] - target[i]));
+    return error;
+  }
+
   function createProjectForImport(fileName) {
     if (typeof setupProject === 'function' && Formats?.free) {
       setupProject(Formats.free);
@@ -73,11 +82,11 @@
     });
     mesh.addTo(armature);
 
-    const localTransform = armature.haraganzito_mesh_trs;
-    if (localTransform) {
-      mesh.origin = [...localTransform.position];
-      mesh.rotation = quaternionToEuler(localTransform.rotation);
-    }
+    /*
+     * Haraganzito's mesh node is identity under the skin container.
+     * Keep the native Mesh itself at identity so Blockbench's deformation
+     * math applies the GLB skin in the correct coordinate space.
+     */
 
     const vertexKeys = new Array(positions.length);
     for (let i = 0; i < positions.length; i++) {
@@ -160,20 +169,7 @@
     cursor = b;
     while (cursor != null) {
       if (ancestors.has(cursor)) return cursor;
-      cursor = intermediate.nodes[cursor]?.parent ?? null;
-    }
-    return null;
-  }
-
-  function matrixToTRS(matrix) {
-    const position = new THREE.Vector3();
-    const quaternion = new THREE.Quaternion();
-    const scale = new THREE.Vector3();
-    matrix.decompose(position, quaternion, scale);
-    return {position, quaternion, scale};
-  }
-
-  function buildArmature(intermediate, skin) {
+      cursor = intermediate.nodes[cursor]?.parent ??   function buildArmature(intermediate, skin) {
     const meshNodeIndex = intermediate.nodes.findIndex(node => node.mesh === 0);
     const skeletonRootIndex = skin.skeleton != null ? skin.skeleton : skin.joints[0];
     if (meshNodeIndex < 0 || skeletonRootIndex == null) {
@@ -188,25 +184,45 @@
 
     const containerWorld = world(containerNodeIndex);
     const meshWorld = world(meshNodeIndex);
-    const meshLocalToContainer = containerWorld.clone().invert().multiply(meshWorld);
+    const containerInverse = containerWorld.clone().invert();
+    const meshLocalToContainer = containerInverse.clone().multiply(meshWorld);
 
-    const armature = new Armature({
-      name: intermediate.nodes[containerNodeIndex]?.name || 'HaraganzitoArmature'
+    const containerTRS = matrixToTRS(containerWorld);
+    const container = new Group({
+      name: intermediate.nodes[containerNodeIndex]?.name || 'HaraganzitoContainer',
+      origin: containerTRS.position.toArray(),
+      rotation: quaternionToEuler(containerTRS.quaternion)
     });
-    armature.addTo(Outliner.ROOT);
+    container.addTo(Outliner.ROOT);
+    container.init();
+    container.mesh.scale.copy(containerTRS.scale);
+    container.mesh.updateMatrixWorld(true);
+
+    /*
+     * IMPORTANT:
+     * Keep the static GLB container transform OUTSIDE the Armature.
+     * Blockbench's Armature.calculateVertexDeformation intentionally uses
+     * the Armature parent's inverse world matrix. With:
+     *
+     *   Container = GLB common parent transform
+     *   Armature = identity under Container
+     *   Mesh       = identity under Armature
+     *
+     * the native deformation becomes exactly:
+     *
+     *   localBoneWorld * GLB_inverseBindMatrix
+     *
+     * which matches the GLB skinning transform in container-local space.
+     */
+    const armature = new Armature({
+      name: (intermediate.nodes[containerNodeIndex]?.name || 'Haraganzito') + '_Armature'
+    });
+    armature.addTo(container);
     armature.init();
-
-    const armatureTRS = matrixToTRS(containerWorld);
-    armature.scene_object.position.copy(armatureTRS.position);
-    armature.scene_object.quaternion.copy(armatureTRS.quaternion);
-    armature.scene_object.scale.copy(armatureTRS.scale);
+    armature.scene_object.position.set(0, 0, 0);
+    armature.scene_object.rotation.set(0, 0, 0);
+    armature.scene_object.scale.set(1, 1, 1);
     armature.scene_object.updateMatrixWorld(true);
-
-    const meshTRS = matrixToTRS(meshLocalToContainer);
-    armature.haraganzito_mesh_local_transform = meshLocalToContainer.toArray();
-    armature.haraganzito_container_node_index = containerNodeIndex;
-    armature.haraganzito_mesh_node_index = meshNodeIndex;
-    armature.haraganzito_container_world_matrix = containerWorld.toArray();
 
     const boneMap = new Map();
 
@@ -251,27 +267,45 @@
     for (const rootIndex of jointRoots) createBoneRecursive(rootIndex, armature);
 
     /*
-     * Blockbench's native Armature deformation works in Armature-local
-     * coordinates. The GLB inverse-bind matrices are defined against the
-     * scene/global skin coordinate. Folding the common container transform
-     * into the Blockbench Armature therefore requires:
-     *
-     *     IBM_native = IBM_gltf * inverse(ContainerWorld)
-     *
-     * for the common-container case used by this importer.
+     * The Haraganzito GLB has an identity mesh-node transform relative to the
+     * common skin container. Preserve raw GLB inverse bind matrices exactly.
+     * No container transform is baked into these matrices.
      */
-    const containerInverse = containerWorld.clone().invert();
+    const meshLocalTRS = matrixToTRS(meshLocalToContainer);
+    const meshLocalIdentityError = maxMatrixIdentityError(meshLocalToContainer);
+
     for (let i = 0; i < skin.joints.length; i++) {
       const nodeIndex = skin.joints[i];
       const bone = boneMap.get(nodeIndex);
       const ibmArray = skin.inverseBindMatrices?.[i];
       if (bone && ibmArray && bone.scene_object?.inverse_bind_matrix) {
         const ibm = new THREE.Matrix4().fromArray(ibmArray);
-        const nativeIBM = ibm.clone().multiply(containerInverse);
-        bone.scene_object.inverse_bind_matrix.copy(nativeIBM);
+        bone.scene_object.inverse_bind_matrix.copy(ibm);
 
         bone.haraganzito_source_inverse_bind_matrix = clone(ibmArray);
-        bone.haraganzito_native_inverse_bind_matrix = nativeIBM.toArray();
+        bone.haraganzito_native_inverse_bind_matrix = ibm.toArray();
+      }
+    }
+
+    armature.haraganzito_bone_map = boneMap;
+    armature.haraganzito_container_group = container;
+    armature.haraganzito_container_node_index = containerNodeIndex;
+    armature.haraganzito_mesh_node_index = meshNodeIndex;
+    armature.haraganzito_container_world_matrix = containerWorld.toArray();
+    armature.haraganzito_mesh_local_to_container = meshLocalToContainer.toArray();
+    armature.haraganzito_mesh_local_transform = {
+      position: meshLocalTRS.position.toArray(),
+      rotation: meshLocalTRS.quaternion.toArray(),
+      scale: meshLocalTRS.scale.toArray()
+    };
+    armature.haraganzito_mesh_local_identity_error = meshLocalIdentityError;
+
+    if (meshLocalIdentityError > 1e-7) {
+      console.warn('[Haraganzito] Mesh node is not identity relative to skin container. Native exact mapping requires a separate mesh-node transform path.');
+    }
+
+    return armature;
+  }_bind_matrix = nativeIBM.toArray();
       }
     }
 
