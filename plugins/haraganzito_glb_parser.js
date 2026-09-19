@@ -104,7 +104,15 @@
     return readAccessor(json, binaryChunks, accessorIndex).flat();
   }
 
-  function readImageMeta(json, binaryChunks, imageIndex) {
+  function base64FromBytes(bytes) {
+    if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64');
+    let out = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) out += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunk, bytes.length)));
+    return btoa(out);
+  }
+
+  function readImageMeta(json, binaryChunks, imageIndex, includeData = false) {
     const image = json.images?.[imageIndex];
     if (!image) throw new Error('Missing image ' + imageIndex);
     if (image.bufferView === undefined) {
@@ -114,7 +122,11 @@
     if (!view) throw new Error('Missing image bufferView ' + image.bufferView);
     const src = binaryChunks[view.buffer ?? 0];
     if (!src) throw new Error('Missing binary image buffer');
-    return {mimeType:image.mimeType || null, byteLength:view.byteLength, embedded:true, uri:null};
+    const meta = {mimeType:image.mimeType || null, byteLength:view.byteLength, embedded:true, uri:null};
+    if (includeData) {
+      meta.dataUrl = 'data:' + (image.mimeType || 'application/octet-stream') + ';base64,' + base64FromBytes(src.subarray(view.byteOffset || 0, (view.byteOffset || 0) + view.byteLength));
+    }
+    return meta;
   }
 
   function nodeLocal(node) {
@@ -142,7 +154,7 @@
     return nodes;
   }
 
-  function parseGLB(arrayBuffer) {
+  function parseGLB(arrayBuffer, options = {}) {
     const {json, binaryChunks} = readGLB(arrayBuffer);
     const nodes = buildNodeTree(json);
 
@@ -153,7 +165,7 @@
     const images = (json.images || []).map((image, i) => ({
       index:i,
       name:image.name || ('image_' + i),
-      ...readImageMeta(json, binaryChunks, i)
+      ...readImageMeta(json, binaryChunks, i, options.includeImageData === true)
     }));
 
     const textures = (json.textures || []).map((texture, i) => ({
