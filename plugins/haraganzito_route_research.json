@@ -128,6 +128,30 @@
         "aggregateSquaredError": 7.476761153346947e-9,
         "note": "Vertex-level native deformation matches the GLB reference within measured floating-point error; scale bind pose and multiplicative scale animation are preserved by the importer."
       }
+    },
+    {
+      "id": "bedrock_rigid_poly_mesh_bones_calibrated_static",
+      "family": "bedrock_normal_geometry_isolation",
+      "purpose": "Isolate and repair the bind-pose geometry mapping using the supplied working Haraganzito v1.0.0 static poly_mesh as calibration reference.",
+      "animated": false,
+      "skinning_mode": "rigid_triangle_assignment",
+      "calibration": {
+        "reference": "Haraganzito v1.0.0.mcaddon",
+        "affine": "P_bedrock = A*P_glb + offset",
+        "scale_diagnostic": "The prior rigid candidate applied the GLB skin-container scale to inverse-bind-transformed vertices but omitted the static v1 model-space calibration, producing geometry about 16x too small.",
+        "bind_geometry_method": "Compute each bone pivot from inverseBindMatrix^-1 in GLB mesh space, map pivot into calibrated Bedrock space, then store each triangle vertex as world_static_position - bone_pivot with zero bind rotation."
+      },
+      "validation": {
+        "checked_glb": "rigged-model.glb",
+        "vertices": 33486,
+        "source_triangles": 50000,
+        "generated_triangles": 50000,
+        "generated_positions": 35029,
+        "affine_residual_max": 0.000008537166764958284,
+        "bind_pose_reconstruction_error_by_generation": 0,
+        "runtime_status": "pending_user_runtime_test"
+      },
+      "exporter": "plugins/haraganzito_calibrated_static.js"
     }
   ],
   "conclusion": {
@@ -153,6 +177,8 @@
   "tooling": {
     "iterator_rigid_mapping_commit": "ec218f1a5736215d915fa0f7f518b6e27f5ff0dc",
     "native_intermediate_retention_commit": "7934321c55821cce36623654d41dcd01fe631f5c",
-    "bedrock_candidate_exporter_commit": "0c6d8bd15b64879435e4692e93c7d26d47da2426"
+    "bedrock_candidate_exporter_commit": "0c6d8bd15b64879435e4692e93c7d26d47da2426",
+    "calibrated_static_route_commit": "f9c1a55cef155fbf879b1adebc401494b61ee9ca",
+    "calibration_report": "haraganzito_static_bones_calibration_report.json"
   }
 }
