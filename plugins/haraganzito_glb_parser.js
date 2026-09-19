@@ -216,7 +216,7 @@
       name:animation.name || ('animation_' + animationIndex),
       samplers:(animation.samplers || []).map((sampler, samplerIndex) => ({
         index:samplerIndex,
-        input:readAccessor(json,binaryChunks,sampler.input),
+        input:readAccessorFlat(json,binaryChunks,sampler.input),
         output:readAccessor(json,binaryChunks,sampler.output),
         interpolation:sampler.interpolation || 'LINEAR'
       })),
