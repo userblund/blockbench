@@ -139,10 +139,16 @@
     const quaternion = new THREE.Quaternion().fromArray(local.rotation || [0, 0, 0, 1]).normalize();
     const scale = new THREE.Vector3().fromArray(local.scale || [1, 1, 1]);
     matrix.compose(position, quaternion, scale);
-    if (Array.isArray(local.matrix)) {
-      matrix.fromArray(local.matrix);
-    }
+    if (Array.isArray(local.matrix)) matrix.fromArray(local.matrix);
     return matrix;
+  }
+
+  function maxMatrixIdentityError(matrix) {
+    const array = matrix.toArray();
+    const identity = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+    let error = 0;
+    for (let i = 0; i < 16; i++) error = Math.max(error, Math.abs(array[i] - identity[i]));
+    return error;
   }
 
   function buildWorldMatrixResolver(intermediate) {
@@ -169,7 +175,20 @@
     cursor = b;
     while (cursor != null) {
       if (ancestors.has(cursor)) return cursor;
-      cursor = intermediate.nodes[cursor]?.parent ??   function buildArmature(intermediate, skin) {
+      cursor = intermediate.nodes[cursor]?.parent ?? null;
+    }
+    return null;
+  }
+
+  function matrixToTRS(matrix) {
+    const position = new THREE.Vector3();
+    const quaternion = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    matrix.decompose(position, quaternion, scale);
+    return {position, quaternion, scale};
+  }
+
+  function buildArmature(intermediate, skin) {
     const meshNodeIndex = intermediate.nodes.findIndex(node => node.mesh === 0);
     const skeletonRootIndex = skin.skeleton != null ? skin.skeleton : skin.joints[0];
     if (meshNodeIndex < 0 || skeletonRootIndex == null) {
@@ -198,22 +217,6 @@
     container.mesh.scale.copy(containerTRS.scale);
     container.mesh.updateMatrixWorld(true);
 
-    /*
-     * IMPORTANT:
-     * Keep the static GLB container transform OUTSIDE the Armature.
-     * Blockbench's Armature.calculateVertexDeformation intentionally uses
-     * the Armature parent's inverse world matrix. With:
-     *
-     *   Container = GLB common parent transform
-     *   Armature = identity under Container
-     *   Mesh       = identity under Armature
-     *
-     * the native deformation becomes exactly:
-     *
-     *   localBoneWorld * GLB_inverseBindMatrix
-     *
-     * which matches the GLB skinning transform in container-local space.
-     */
     const armature = new Armature({
       name: (intermediate.nodes[containerNodeIndex]?.name || 'Haraganzito') + '_Armature'
     });
@@ -253,9 +256,7 @@
       boneMap.set(nodeIndex, bone);
 
       for (const childIndex of node.children || []) {
-        if (skin.joints.includes(childIndex)) {
-          createBoneRecursive(childIndex, bone);
-        }
+        if (skin.joints.includes(childIndex)) createBoneRecursive(childIndex, bone);
       }
       return bone;
     }
@@ -266,14 +267,18 @@
     });
     for (const rootIndex of jointRoots) createBoneRecursive(rootIndex, armature);
 
-    /*
-     * The Haraganzito GLB has an identity mesh-node transform relative to the
-     * common skin container. Preserve raw GLB inverse bind matrices exactly.
-     * No container transform is baked into these matrices.
-     */
     const meshLocalTRS = matrixToTRS(meshLocalToContainer);
     const meshLocalIdentityError = maxMatrixIdentityError(meshLocalToContainer);
 
+    /*
+     * Preserve the GLB inverse bind matrices exactly.
+     *
+     * The static container transform is outside the Blockbench Armature.
+     * Blockbench's Armature.calculateVertexDeformation then uses the inverse
+     * world matrix of that container as the parent correction, so the native
+     * skin matrix becomes equivalent to the GLB skin matrix in
+     * container-local coordinates.
+     */
     for (let i = 0; i < skin.joints.length; i++) {
       const nodeIndex = skin.joints[i];
       const bone = boneMap.get(nodeIndex);
@@ -281,7 +286,6 @@
       if (bone && ibmArray && bone.scene_object?.inverse_bind_matrix) {
         const ibm = new THREE.Matrix4().fromArray(ibmArray);
         bone.scene_object.inverse_bind_matrix.copy(ibm);
-
         bone.haraganzito_source_inverse_bind_matrix = clone(ibmArray);
         bone.haraganzito_native_inverse_bind_matrix = ibm.toArray();
       }
@@ -301,22 +305,12 @@
     armature.haraganzito_mesh_local_identity_error = meshLocalIdentityError;
 
     if (meshLocalIdentityError > 1e-7) {
-      console.warn('[Haraganzito] Mesh node is not identity relative to skin container. Native exact mapping requires a separate mesh-node transform path.');
+      console.warn('[Haraganzito] Mesh node is not identity relative to skin container; exact native mapping needs a separate mesh-node transform path.');
     }
 
-    return armature;
-  }_bind_matrix = nativeIBM.toArray();
-      }
-    }
-
-    armature.haraganzito_bone_map = boneMap;
-    armature.haraganzito_mesh_trs = {
-      position: meshTRS.position.toArray(),
-      rotation: meshTRS.quaternion.toArray(),
-      scale: meshTRS.scale.toArray()
-    };
     return armature;
   }
+
 
   function transferWeights(intermediate, skin, armature, mesh, vertexKeys) {
     const primitive = intermediate.meshes[0].primitives[0];
