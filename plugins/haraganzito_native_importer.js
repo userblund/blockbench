@@ -432,9 +432,9 @@
       icon: 'icon-import',
       category: 'file',
       click() {
-        Blockbench.read([], {
+        Blockbench.importFile({
           extensions: ['glb'],
-          type: 'file',
+          type: 'Haraganzito GLB',
           readtype: 'binary',
           resource_id: 'haraganzito_glb_native_import',
           title: 'Import Haraganzito GLB'
