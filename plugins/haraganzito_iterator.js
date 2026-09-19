@@ -428,110 +428,346 @@
 
   function buildRigidPolyMeshCandidate(intermediate, options = {}) {
     const source = glbIntermediateToRouteInput(intermediate);
+    const primitive = intermediate.meshes?.[0]?.primitives?.[0];
+    const skin = intermediate.skins?.[0];
+    if (!primitive || !skin) throw new Error('HARAGANZITO_RIGID_ROUTE_REQUIRES_SKINNED_PRIMITIVE');
+
     const flipX = options.flipX !== false;
-    const bones = source.bones || [];
-    const geometryBones = bones.map(bone => ({
-      name: bone.name,
-      parent: bone.parent,
-      pivot: [...bone.position],
-      poly_mesh: {
-        normalized_uvs: true,
-        positions: [],
-        normals: [],
-        uvs: [],
-        polys: []
-      }
-    }));
 
-    const primitive = intermediate.meshes[0]?.primitives[0];
-    const positions = primitive?.attributes?.POSITION || [];
-    const normals = primitive?.attributes?.NORMAL || [];
-    const uvs = primitive?.attributes?.TEXCOORD_0 || [];
-    const weights = primitive?.attributes?.WEIGHTS_0 || [];
-    const joints = primitive?.attributes?.JOINTS_0 || [];
-    const indices = primitive?.indices || [];
-
-    function position(i) {
-      const p = [...positions[i]];
-      if (flipX) p[0] *= -1;
-      return p;
+    function identity4() {
+      return [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
     }
-
-    const maps = new Map();
-
-    function addVertex(boneIndex, sourceIndex) {
-      const key = boneIndex + ':' + sourceIndex;
-      if (!maps.has(key)) {
-        const b = geometryBones[boneIndex];
-        const pm = b.poly_mesh;
-        const newIndex = pm.positions.length;
-        maps.set(key, newIndex);
-        pm.positions.push(position(sourceIndex));
-        pm.normals.push([...(normals[sourceIndex] || [0,1,0])]);
-        const uv = [...(uvs[sourceIndex] || [0,0])];
-        pm.uvs.push(uv);
+    function mul4(a, b) {
+      const o = new Array(16).fill(0);
+      for (let c=0;c<4;c++) for (let r=0;r<4;r++) for (let k=0;k<4;k++) {
+        o[c*4+r] += a[k*4+r] * b[c*4+k];
       }
-      return maps.get(key);
+      return o;
     }
-
-    let polygonCount = 0;
-    for (let i = 0; i + 2 < indices.length; i += 3) {
-      const a = indices[i], b = indices[i+1], c = indices[i+2];
-      const da = dominantBone({weights: weights[a], joints: joints[a]}, a);
-      const db = dominantBone({weights: weights[b], joints: joints[b]}, b);
-      const dc = dominantBone({weights: weights[c], joints: joints[c]}, c);
-      // A triangle cannot belong to three different rigid bones without
-      // changing its deformation model. Assign it to the strongest vertex
-      // influence and record that this is a lossy rigid approximation.
-      const counts = new Map();
-      for (const bone of [da, db, dc]) counts.set(bone, (counts.get(bone) || 0) + 1);
-      let targetBone = da;
-      for (const [bone, count] of counts) {
-        if (count > (counts.get(targetBone) || 0)) targetBone = bone;
-      }
-      if (!geometryBones[targetBone]) continue;
-      const pm = geometryBones[targetBone].poly_mesh;
-      const poly = [
-        [addVertex(targetBone, a), 0, addVertex(targetBone, a)],
-        [addVertex(targetBone, b), 1, addVertex(targetBone, b)],
-        [addVertex(targetBone, c), 2, addVertex(targetBone, c)],
+    function transform4(m, v) {
+      return [
+        m[0]*v[0] + m[4]*v[1] + m[8]*v[2] + m[12],
+        m[1]*v[0] + m[5]*v[1] + m[9]*v[2] + m[13],
+        m[2]*v[0] + m[6]*v[1] + m[10]*v[2] + m[14]
       ];
-      pm.polys.push(poly);
-      polygonCount++;
     }
-
-    const animationFiles = (intermediate.animations || []).map(animation => {
-      const bonesOut = {};
-      for (const channel of animation.channels || []) {
-        const sampler = animation.samplers[channel.sampler];
-        const targetNode = channel.targetNode;
-        const bone = source.bones.find(b => b.nodeIndex === targetNode);
-        if (!bone || !sampler) continue;
-        if (!bonesOut[bone.name]) bonesOut[bone.name] = {};
-        const values = sampler.input.map((time, k) => {
-          const value = sampler.output[k];
-          return {time, value};
-        });
-        const keyframes = values.map(k => [k.time, k.value]);
-        if (channel.path === 'translation') bonesOut[bone.name].position = keyframes;
-        if (channel.path === 'rotation') bonesOut[bone.name].rotation = keyframes;
-        if (channel.path === 'scale') bonesOut[bone.name].scale = keyframes;
+    function inverse4(m) {
+      const a = [
+        [m[0],m[4],m[8],m[12]],
+        [m[1],m[5],m[9],m[13]],
+        [m[2],m[6],m[10],m[14]],
+        [m[3],m[7],m[11],m[15]]
+      ];
+      const b = [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]];
+      for (let c=0;c<4;c++) {
+        let p=c;
+        for (let r=c+1;r<4;r++) if (Math.abs(a[r][c]) > Math.abs(a[p][c])) p=r;
+        if (Math.abs(a[p][c]) < 1e-14) throw new Error('HARAGANZITO_SINGULAR_MATRIX');
+        [a[c],a[p]]=[a[p],a[c]];
+        [b[c],b[p]]=[b[p],b[c]];
+        const d=a[c][c];
+        for (let j=0;j<4;j++) { a[c][j]/=d; b[c][j]/=d; }
+        for (let r=0;r<4;r++) if (r!==c) {
+          const f=a[r][c];
+          for (let j=0;j<4;j++) { a[r][j]-=f*a[c][j]; b[r][j]-=f*b[c][j]; }
+        }
+      }
+      const out=[];
+      for (let c=0;c<4;c++) for (let r=0;r<4;r++) out[c*4+r]=b[r][c];
+      return out;
+    }
+    function norm4(q) {
+      const n=Math.hypot(q[0],q[1],q[2],q[3]) || 1;
+      return q.map(v=>v/n);
+    }
+    function quatMul(a,b) {
+      return norm4([
+        a[3]*b[0] + a[0]*b[3] + a[1]*b[2] - a[2]*b[1],
+        a[3]*b[1] - a[0]*b[2] + a[1]*b[3] + a[2]*b[0],
+        a[3]*b[2] + a[0]*b[1] - a[1]*b[0] + a[2]*b[3],
+        a[3]*b[3] - a[0]*b[0] - a[1]*b[1] - a[2]*b[2]
+      ]);
+    }
+    function quatToMatrix(q) {
+      const [x,y,z,w]=norm4(q);
+      return [
+        1-2*(y*y+z*z), 2*(x*y+z*w), 2*(x*z-y*w), 0,
+        2*(x*y-z*w), 1-2*(x*x+z*z), 2*(y*z+x*w), 0,
+        2*(x*z+y*w), 2*(y*z-x*w), 1-2*(x*x+y*y), 0,
+        0,0,0,1
+      ];
+    }
+    function composeTRS(t,q,s) {
+      const m=quatToMatrix(q);
+      m[0]*=s[0]; m[1]*=s[0]; m[2]*=s[0];
+      m[4]*=s[1]; m[5]*=s[1]; m[6]*=s[1];
+      m[8]*=s[2]; m[9]*=s[2]; m[10]*=s[2];
+      m[12]=t[0]; m[13]=t[1]; m[14]=t[2];
+      return m;
+    }
+    function decomposeTRS(m) {
+      const sx=Math.hypot(m[0],m[1],m[2]);
+      const sy=Math.hypot(m[4],m[5],m[6]);
+      const sz=Math.hypot(m[8],m[9],m[10]);
+      const r=m.slice();
+      if (sx) { r[0]/=sx; r[1]/=sx; r[2]/=sx; }
+      if (sy) { r[4]/=sy; r[5]/=sy; r[6]/=sy; }
+      if (sz) { r[8]/=sz; r[9]/=sz; r[10]/=sz; }
+      const tr=r[0]+r[5]+r[10];
+      let x,y,z,w;
+      if (tr>0) {
+        const s=Math.sqrt(tr+1)*2;
+        w=.25*s; x=(r[6]-r[9])/s; y=(r[8]-r[2])/s; z=(r[1]-r[4])/s;
+      } else if (r[0]>r[5] && r[0]>r[10]) {
+        const s=Math.sqrt(1+r[0]-r[5]-r[10])*2;
+        w=(r[6]-r[9])/s; x=.25*s; y=(r[4]+r[1])/s; z=(r[8]+r[2])/s;
+      } else if (r[5]>r[10]) {
+        const s=Math.sqrt(1+r[5]-r[0]-r[10])*2;
+        w=(r[8]-r[2])/s; x=(r[4]+r[1])/s; y=.25*s; z=(r[9]+r[6])/s;
+      } else {
+        const s=Math.sqrt(1+r[10]-r[0]-r[5])*2;
+        w=(r[1]-r[4])/s; x=(r[8]+r[2])/s; y=(r[9]+r[6])/s; z=.25*s;
       }
       return {
-        name: animation.name,
-        length: Math.max(0, ...animation.samplers.flatMap(s => s.input || [])),
-        bones: bonesOut
+        translation:[m[12],m[13],m[14]],
+        scale:[sx,sy,sz],
+        quaternion:norm4([x,y,z,w])
+      };
+    }
+    function sourceWorld(nodeIndex) {
+      const cache=new Map();
+      function world(i) {
+        if (cache.has(i)) return cache.get(i);
+        const node=intermediate.nodes[i];
+        if (!node) throw new Error('HARAGANZITO_NODE_NOT_FOUND:'+i);
+        const local=node.local||{};
+        const localM=composeTRS(
+          local.translation||[0,0,0],
+          local.rotation||[0,0,0,1],
+          local.scale||[1,1,1]
+        );
+        const out=node.parent==null ? localM : mul4(world(node.parent),localM);
+        cache.set(i,out);
+        return out;
+      }
+      return world(nodeIndex);
+    }
+    function lowestCommonAncestor(a,b) {
+      const seen=new Set();
+      let x=a;
+      while (x!=null) { seen.add(x); x=intermediate.nodes[x]?.parent ?? null; }
+      x=b;
+      while (x!=null) {
+        if (seen.has(x)) return x;
+        x=intermediate.nodes[x]?.parent ?? null;
+      }
+      return null;
+    }
+    function inverseTransposeNormal(m,n) {
+      const a00=m[0],a01=m[4],a02=m[8];
+      const a10=m[1],a11=m[5],a12=m[9];
+      const a20=m[2],a21=m[6],a22=m[10];
+      const det=a00*(a11*a22-a12*a21)-a01*(a10*a22-a12*a20)+a02*(a10*a21-a11*a20);
+      if (Math.abs(det)<1e-14) return [...n];
+      const it=[
+        (a11*a22-a12*a21)/det,(a02*a21-a01*a22)/det,(a01*a12-a02*a11)/det,
+        (a12*a20-a10*a22)/det,(a00*a22-a02*a20)/det,(a02*a10-a00*a12)/det,
+        (a10*a21-a11*a20)/det,(a01*a20-a00*a21)/det,(a00*a11-a01*a10)/det
+      ];
+      const out=[
+        it[0]*n[0]+it[3]*n[1]+it[6]*n[2],
+        it[1]*n[0]+it[4]*n[1]+it[7]*n[2],
+        it[2]*n[0]+it[5]*n[1]+it[8]*n[2]
+      ];
+      const len=Math.hypot(...out)||1;
+      return out.map(v=>v/len);
+    }
+
+    const meshNodeIndex=intermediate.nodes.findIndex(node=>node.mesh===0);
+    const skeletonRoot=skin.skeleton!=null ? skin.skeleton : skin.joints[0];
+    const containerIndex=lowestCommonAncestor(meshNodeIndex,skeletonRoot);
+    if (meshNodeIndex<0 || containerIndex==null) throw new Error('HARAGANZITO_COMMON_SKIN_CONTAINER_NOT_FOUND');
+
+    const container=decomposeTRS(sourceWorld(containerIndex));
+    const scale=container.scale;
+    const uniformScaleError=Math.max(Math.abs(scale[0]-scale[1]),Math.abs(scale[1]-scale[2]),Math.abs(scale[0]-scale[2]));
+    if (uniformScaleError>1e-5 && options.allowNonUniformContainerScale!==true) {
+      throw new Error('HARAGANZITO_NON_UNIFORM_CONTAINER_SCALE:'+uniformScaleError);
+    }
+    const scalar=(scale[0]+scale[1]+scale[2])/3;
+    const jointIndexByNode=new Map(skin.joints.map((nodeIndex,index)=>[nodeIndex,index]));
+
+    const bones=(source.bones||[]).map(bone=>{
+      const node=intermediate.nodes[bone.nodeIndex];
+      const parentNode=node?.parent;
+      const parentBoneIndex=jointIndexByNode.has(parentNode) ? jointIndexByNode.get(parentNode) : null;
+      const localT=node?.local?.translation || [0,0,0];
+      const localQ=norm4(node?.local?.rotation || [0,0,0,1]);
+      const localS=node?.local?.scale || [1,1,1];
+      const root=parentBoneIndex==null;
+      const scaledT=[scalar*localT[0],scalar*localT[1],scalar*localT[2]];
+      let pivot=scaledT;
+      let rotationQ=localQ;
+      if (root) {
+        const rotated=transform4(quatToMatrix(container.quaternion),scaledT);
+        pivot=[
+          container.translation[0]+rotated[0],
+          container.translation[1]+rotated[1],
+          container.translation[2]+rotated[2]
+        ];
+        rotationQ=quatMul(container.quaternion,localQ);
+      }
+      return {
+        index:bone.index,
+        nodeIndex:bone.nodeIndex,
+        name:bone.name,
+        parentBoneIndex,
+        parent:parentBoneIndex==null ? null : source.bones[parentBoneIndex]?.name || null,
+        pivot,
+        rotationQuaternion:rotationQ,
+        rotation:quaternionToEulerDegrees(rotationQ),
+        sourceScale:localS,
+        sourceInverseBindMatrix:clone(bone.inverseBindMatrix)
+      };
+    });
+
+    const positions=primitive.attributes.POSITION||[];
+    const normals=primitive.attributes.NORMAL||[];
+    const uvs=primitive.attributes.TEXCOORD_0||[];
+    const joints=primitive.attributes.JOINTS_0||[];
+    const weights=primitive.attributes.WEIGHTS_0||[];
+    const indices=primitive.indices||[];
+
+    const boneMeshes=bones.map(b=>({
+      positions:[],
+      normals:[],
+      uvs:[],
+      polys:[],
+      sourceVertices:[],
+      vertexMap:new Map()
+    }));
+
+    function addVertex(boneIndex,vertexIndex) {
+      const mesh=boneMeshes[boneIndex];
+      const key=String(vertexIndex);
+      if (mesh.vertexMap.has(key)) return mesh.vertexMap.get(key);
+      const ibm=bones[boneIndex].sourceInverseBindMatrix;
+      const local=transform4(ibm,positions[vertexIndex]);
+      const p=[local[0]*scalar,local[1]*scalar,local[2]*scalar];
+      const n=inverseTransposeNormal(ibm,normals[vertexIndex]||[0,1,0]);
+      const uv=[...(uvs[vertexIndex]||[0,0])];
+      const outPos=flipX ? [-p[0],p[1],p[2]] : p;
+      const outIndex=mesh.positions.length;
+      mesh.positions.push(outPos);
+      mesh.normals.push(n);
+      mesh.uvs.push(uv);
+      mesh.sourceVertices.push(vertexIndex);
+      mesh.vertexMap.set(key,outIndex);
+      return outIndex;
+    }
+
+    const triangleMappings=[];
+    for (let i=0;i+2<indices.length;i+=3) {
+      const vertices=[indices[i],indices[i+1],indices[i+2]];
+      const score=new Array(bones.length).fill(0);
+      for (const vertexIndex of vertices) {
+        const row=joints[vertexIndex]||[];
+        const weightsRow=weights[vertexIndex]||[];
+        for (let k=0;k<row.length;k++) score[row[k]] += Number(weightsRow[k]||0);
+      }
+      let target=0;
+      for (let b=1;b<score.length;b++) if (score[b]>score[target]+1e-15) target=b;
+      const mesh=boneMeshes[target];
+      const poly=vertices.map(vertexIndex=>{
+        const p=addVertex(target,vertexIndex);
+        const u=mesh.uvs[p] ? p : p;
+        return [p,p,u];
+      });
+      mesh.polys.push(poly);
+      triangleMappings.push({triangle:i/3,bone:target,vertices});
+    }
+
+    const geometryBones=bones.map((bone,index)=>{
+      const mesh=boneMeshes[index];
+      const out={name:bone.name};
+      if (bone.parent) out.parent=bone.parent;
+      out.pivot=bone.pivot.slice();
+      if (bone.rotation.some(v=>Math.abs(v)>1e-12)) out.rotation=[-bone.rotation[0],-bone.rotation[1],bone.rotation[2]];
+      if (mesh.polys.length) {
+        out.poly_mesh={
+          normalized_uvs:true,
+          positions:mesh.positions,
+          normals:mesh.normals,
+          uvs:mesh.uvs,
+          polys:mesh.polys
+        };
+      }
+      return out;
+    });
+
+    const animationFiles=(intermediate.animations||[]).map(animation=>{
+      const boneOut={};
+      for (const channel of animation.channels||[]) {
+        const sampler=animation.samplers[channel.sampler];
+        const node=intermediate.nodes[channel.targetNode];
+        const bone=source.bones.find(item=>item.nodeIndex===channel.targetNode);
+        if (!sampler || !node || !bone) continue;
+        const boneIndex=bone.index;
+        const candidateBone=bones[boneIndex];
+        if (!boneOut[candidateBone.name]) boneOut[candidateBone.name]={};
+        const bindT=node.local?.translation || [0,0,0];
+        const bindQ=norm4(node.local?.rotation || [0,0,0,1]);
+        const bindS=node.local?.scale || [1,1,1];
+        const keyframes={};
+        for (let k=0;k<sampler.input.length;k++) {
+          const time=String(sampler.input[k]);
+          const value=sampler.output[k]||[];
+          if (channel.path==='translation') {
+            let delta=[
+              ((value[0]??0)-(bindT[0]??0))*scalar,
+              ((value[1]??0)-(bindT[1]??0))*scalar,
+              ((value[2]??0)-(bindT[2]??0))*scalar
+            ];
+            if (candidateBone.parentBoneIndex==null) {
+              delta=transform4(quatToMatrix(container.quaternion),delta);
+            }
+            if (flipX) delta[0]*=-1;
+            if (!boneOut[candidateBone.name].position) boneOut[candidateBone.name].position={};
+            boneOut[candidateBone.name].position[time]=delta;
+          } else if (channel.path==='rotation') {
+            const baseInv=[-bindQ[0],-bindQ[1],-bindQ[2],bindQ[3]];
+            const deltaQ=quatMul(baseInv,norm4(value));
+            const e=quaternionToEulerDegrees(deltaQ);
+            if (flipX) e[0]*=-1;
+            e[1]*=-1;
+            if (!boneOut[candidateBone.name].rotation) boneOut[candidateBone.name].rotation={};
+            boneOut[candidateBone.name].rotation[time]=e;
+          } else if (channel.path==='scale') {
+            if (!boneOut[candidateBone.name].scale) boneOut[candidateBone.name].scale={};
+            boneOut[candidateBone.name].scale[time]=[
+              (value[0]??1)/(bindS[0]||1),
+              (value[1]??1)/(bindS[1]||1),
+              (value[2]??1)/(bindS[2]||1)
+            ];
+          }
+        }
+      }
+      return {
+        name:animation.name,
+        length:Math.max(0,...animation.samplers.flatMap(s=>s.input||[])),
+        loop:true,
+        bones:boneOut
       };
     });
 
     return {
-      schema:'haraganzito.candidate.rigid_polymesh.v1',
+      schema:'haraganzito.candidate.rigid_polymesh.v2',
       route:'bedrock_rigid_poly_mesh_bones',
       exact:false,
       lossModel:{
-        skinning:'rigid_dominant_bone',
-        discardedContinuousWeights:true,
-        discardedWeightDetails:true
+        skinning:'triangle_rigid_assignment',
+        assignment:'max_sum_of_source_vertex_weights',
+        discardedContinuousWeights:true
       },
       geometry:{
         format_version:'1.21.0',
@@ -541,16 +777,26 @@
             texture_width:4096,
             texture_height:4096
           },
-          bones:geometryBones.filter(b => b.poly_mesh.polys.length || b.parent != null)
+          bones:geometryBones
         }]
       },
       animations:animationFiles,
       diagnostics:{
         sourceVertices:positions.length,
         sourceTriangles:Math.floor(indices.length/3),
-        generatedTriangles:polygonCount,
-        bones:geometryBones.length,
-        flipX
+        generatedTriangles:triangleMappings.length,
+        bones:bones.length,
+        bonesWithPolyMesh:geometryBones.filter(b=>b.poly_mesh).length,
+        meshNodeIndex,
+        skeletonRoot,
+        containerIndex,
+        containerName:intermediate.nodes[containerIndex]?.name||null,
+        containerTranslation:container.translation,
+        containerScale:container.scale,
+        containerRotationQuaternion:container.quaternion,
+        containerUniformScaleError:uniformScaleError,
+        triangleMappings,
+        sourceScaleNonUnitMaxDeviation:Math.max(0,...bones.map(b=>Math.max(...b.sourceScale.map(s=>Math.abs(s-1)))))
       }
     };
   }
