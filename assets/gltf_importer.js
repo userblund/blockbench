@@ -2435,8 +2435,20 @@
       if (typeof updateInterface === "function") {
         updateInterface();
       }
+      // The mode selector is a Vue component and can cache the condition
+      // until it receives an explicit update.
+      if (typeof Modes !== "undefined" && Modes.vue && typeof Modes.vue.$forceUpdate === "function") {
+        Modes.vue.$forceUpdate();
+      }
 
       setTimeout(() => {
+        try {
+          if (typeof Modes !== "undefined" && Modes.options?.animate && Condition(Modes.options.animate.condition)) {
+            // Refresh the selector once more after the imported project has settled.
+            Modes.vue?.$forceUpdate?.();
+          }
+        } catch (e) {}
+
         try {
           const firstAnim = content.animations[0];
           if (firstAnim && typeof firstAnim.select === "function") {
