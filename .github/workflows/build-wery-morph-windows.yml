@@ -1,0 +1,40 @@
+name: Wery Morph Blockbench Windows
+
+on:
+  push:
+    branches: [wery-morph-glb-bridge]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build-windows-portable:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows portable executable
+        run: |
+          npm run build-electron
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); delete p.build.win.signtoolOptions; p.build.win.target={target:'portable',arch:['x64']}; fs.writeFileSync('electron-builder-ci.json', JSON.stringify(p.build, null, 2));"
+          npx electron-builder --config electron-builder-ci.json --publish=never
+
+      - name: Upload portable EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Blockbench-Wery-Morph-Windows
+          path: dist-electron/*.exe
+          if-no-files-found: error
+          retention-days: 14
