@@ -1,3 +1,4 @@
+import { ArmatureBone } from "../outliner/types/armature_bone";
 import Wintersky from 'wintersky';
 import { THREE } from '../lib/libs';
 
@@ -788,7 +789,11 @@ class ArmatureBoneAnimator extends BoneAnimator {
 		rotation: {name: tl('timeline.rotation'), mutable: true, transform: true, max_data_points: 2},
 		scale: {name: tl('timeline.scale'), mutable: true, transform: true, max_data_points: 2},
 	}
-	ArmatureBone.animator = ArmatureBoneAnimator;
+	// ArmatureBone is imported explicitly. Delay registration until the module
+	// graph has finished evaluating to avoid a TDZ/circular-initialization crash.
+	queueMicrotask(() => {
+		ArmatureBone.animator = ArmatureBoneAnimator;
+	});
 
 export class NullObjectAnimator extends BoneAnimator {
 	constructor(uuid, animation, name) {
