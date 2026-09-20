@@ -2426,6 +2426,16 @@
       });
     }
     if (content.animations.length > 0) {
+      // A Generic/mesh project can legitimately start with animation mode disabled.
+      // glTF morph-target clips are real Blockbench animations, so expose the
+      // native "Animar" mode as soon as at least one clip has been imported.
+      if (Format) {
+        Format.animation_mode = true;
+      }
+      if (typeof updateInterface === "function") {
+        updateInterface();
+      }
+
       setTimeout(() => {
         try {
           const firstAnim = content.animations[0];
