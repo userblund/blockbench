@@ -26,7 +26,8 @@ jobs:
       - name: Build Windows portable executable
         run: |
           npm run build-electron
-          npx electron-builder --windows portable --publish=never --config.win.sign=false
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); delete p.build.win.signtoolOptions; p.build.win.target={target:'portable',arch:['x64']}; fs.writeFileSync('electron-builder-ci.json', JSON.stringify(p.build, null, 2));"
+          npx electron-builder --config electron-builder-ci.json --publish=never
 
       - name: Upload portable EXE
         uses: actions/upload-artifact@v4
