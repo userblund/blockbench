@@ -1,4 +1,4 @@
-import { MorphAnimator } from "../../animations/timeline_animators";
+import { MorphAnimator } from "../../animations/morph_animator";
 import { Property } from "../../util/property";
 import { Face } from "../abstract/face";
 
