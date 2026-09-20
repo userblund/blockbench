@@ -2933,7 +2933,161 @@
     return bbTexture ?? void 0;
   }
 
-  // plugin/plugin.ts
+    // Wery morph-target animator bridge. This class deliberately does not import
+  // Blockbench core animator modules, so loading the Mesh module never creates
+  // a circular dependency with ArmatureBone.
+  class WeryMorphAnimator {
+    constructor(uuid, animation, name) {
+      this.animation = animation;
+      this.expanded = false;
+      this.selected = false;
+      this.uuid = uuid || guid();
+      this._name = name;
+      this.channels = {};
+      this.muted = {};
+    }
+    get node() { return this.element || this.getElement(); }
+    get keyframes() {
+      const result = [];
+      for (const channel of Object.keys(this.channels)) {
+        if (Array.isArray(this[channel])) result.push(...this[channel]);
+      }
+      return result;
+    }
+    get name() {
+      const element = this.getElement();
+      return element?.name || this._name || "Morphs";
+    }
+    set name(v) { this._name = v; }
+    getElement() {
+      this.element = OutlinerNode.uuids[this.uuid];
+      return this.element;
+    }
+    getUndoCopy(options = {}) {
+      const copy = {name: this.name, type: "morph"};
+      if (this.keyframes.length) copy.keyframes = this.keyframes.map(kf => kf.getUndoCopy(true, {absolute_paths: options.absolute_paths}));
+      return copy;
+    }
+    select() {
+      Object.values(this.animation.animators || {}).forEach(anim => anim.selected = false);
+      this.selected = true;
+      Timeline.selected_animator = this;
+      this.addToTimeline();
+      return this;
+    }
+    clickSelect() {
+      Undo.initSelection();
+      this.select();
+      Undo.finishSelection("Select animator");
+    }
+    addToTimeline(end_of_list = false) {
+      if (!Timeline.animators.includes(this)) {
+        if (end_of_list) Timeline.animators.push(this);
+        else Timeline.animators.splice(0, 0, this);
+      }
+      for (const channel of Object.keys(this.channels)) {
+        if (!this[channel]) Vue.set(this, channel, []);
+      }
+      this.expanded = true;
+      TickUpdates.keyframe_selection = true;
+      return this;
+    }
+    ensureChannel(index) {
+      index = Math.max(0, Math.floor(Number(index) || 0));
+      const channel = "morph_" + index;
+      if (!this.channels[channel]) {
+        Vue.set(this.channels, channel, {
+          name: "Morph " + index,
+          condition: () => true,
+          transform: false,
+          mutable: true,
+          max_data_points: 1
+        });
+        Vue.set(this, channel, []);
+        Vue.set(this.muted, channel, false);
+      }
+      return channel;
+    }
+    addKeyframe(data, uuid) {
+      let channel = data?.channel;
+      if (typeof channel === "number") channel = "morph_" + channel;
+      if (typeof channel === "string" && channel.startsWith("morph_")) {
+        this.ensureChannel(parseInt(channel.slice(6), 10));
+      }
+      if (!channel || !this[channel]) return;
+      const kf = new Keyframe(data, uuid, this);
+      this[channel].push(kf);
+      kf.animator = this;
+      return kf;
+    }
+    createKeyframe(value, time, channel, undo, select) {
+      if (!channel || !channel.startsWith("morph_")) return;
+      this.ensureChannel(parseInt(channel.slice(6), 10));
+      if (typeof time !== "number") time = Timeline.time;
+      const keyframe = new Keyframe({
+        channel,
+        time,
+        interpolation: settings.default_keyframe_interpolation.value
+      }, null, this);
+      if (typeof value === "number") {
+        keyframe.extend({data_points: [{x: value, y: 0, z: 0}]});
+      } else if (value) {
+        keyframe.extend(value);
+      } else {
+        keyframe.extend({data_points: [{x: 0, y: 0, z: 0}]});
+      }
+      keyframe.channel = channel;
+      keyframe.time = Timeline.snapTime(time);
+      this[channel].push(keyframe);
+      keyframe.animator = this;
+      return keyframe;
+    }
+    getScalarValue(keyframe) {
+      const value = keyframe?.data_points?.[0]?.x;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : 0;
+    }
+    interpolate(channel) {
+      const frames = this[channel];
+      if (!frames?.length) return 0;
+      frames.sort((a,b) => a.time-b.time);
+      const time = this.animation?.time ?? Timeline.time;
+      if (time <= frames[0].time) return this.getScalarValue(frames[0]);
+      const last = frames[frames.length-1];
+      if (time >= last.time) return this.getScalarValue(last);
+      let before = frames[0], after = last;
+      for (let i=1; i<frames.length; i++) {
+        if (frames[i].time >= time) { after = frames[i]; before = frames[i-1]; break; }
+      }
+      if (after.time === before.time || after.interpolation === "step") return this.getScalarValue(before);
+      const t = Math.clamp((time-before.time)/(after.time-before.time), 0, 1);
+      return this.getScalarValue(before) + (this.getScalarValue(after)-this.getScalarValue(before))*t;
+    }
+    displayFrame(multiplier = 1) {
+      const element = this.getElement();
+      const mesh = element?.mesh;
+      if (!mesh) return;
+      const geometry = element._gltf_morph_geometry;
+      if (geometry && mesh.geometry !== geometry) {
+        mesh.geometry = geometry;
+        if (element._gltf_morph_material) mesh.material = element._gltf_morph_material;
+      }
+      if (!mesh.morphTargetInfluences) return;
+      mesh.morphTargetInfluences.fill(0);
+      for (const channel of Object.keys(this.channels)) {
+        if (!channel.startsWith("morph_") || this.muted[channel]) continue;
+        const index = parseInt(channel.slice(6), 10);
+        if (Number.isInteger(index) && index >= 0 && index < mesh.morphTargetInfluences.length) {
+          mesh.morphTargetInfluences[index] = this.interpolate(channel) * multiplier;
+        }
+      }
+      mesh.geometry?.computeBoundingSphere?.();
+      mesh.geometry?.computeBoundingBox?.();
+      mesh.geometry?.attributes?.position && (mesh.geometry.attributes.position.needsUpdate = true);
+    }
+  }
+
+// plugin/plugin.ts
   BBPlugin.register("gltf_importer", {
     title: "glTF Importer",
     author: "0x13F",
@@ -2947,6 +3101,7 @@
     tags: ["Format: Generic Model", "Importer"],
     repository: "https://github.com/JannisX11/blockbench-plugins/tree/master/plugins/gltf_importer",
     onload() {
+      Mesh.animator = WeryMorphAnimator;
       deferDelete(new Action("import_gltf", {
         name: "Import glTF Model",
         icon: "icon-gltf",
