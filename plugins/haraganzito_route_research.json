@@ -161,6 +161,34 @@
       "runtime_status": "failed_user_test",
       "failure_observation": "User screenshot 11442 shows the mesh broken into disconnected bone-driven pieces. Removing nonzero pivots does not solve the fundamental loss from replacing continuous vertex skinning by rigid triangle/bone assignment.",
       "conclusion": "Stop iterating pivot/coordinate variants of rigid poly_mesh as the primary path. Preserve the exact working v1.0.0 static mesh and investigate a representation that carries per-vertex weights."
+    },
+    {
+      "id": "china_polymesh_skeleton_animation_experimental_v1",
+      "family": "bedrock_china_reference",
+      "purpose": "Preserve per-vertex multi-influence GLB skinning in the polymesh+skeleton+animation structure documented in Blockbench issue #2706.",
+      "animated": true,
+      "skinning_mode": "full_per_vertex_weights",
+      "source_geometry": "supplied working Haraganzito v1.0.0 poly_mesh used as static coordinate/reference mapping",
+      "validation": {
+        "sourceVertices": 33486,
+        "outputVertices": 33447,
+        "sourceTriangles": 50000,
+        "outputTriangles": 50000,
+        "bones": 22,
+        "animations": 6,
+        "multiInfluenceVertices": 27128,
+        "maxInfluences": 4,
+        "static_reference_exact_triangle_count": true,
+        "runtime_status": "unproven"
+      },
+      "representation_variants": {
+        "full": "vertex.weight contains all [bone,weight] pairs as an experimental extension; vertex.weights duplicates them",
+        "pair": "vertex.weight contains only the documented single [bone,weight] pair"
+      },
+      "exporter": "plugins/haraganzito_china_polymesh_exporter.js",
+      "artifact": "Haraganzito_ChinaPolymesh_Experimental.zip",
+      "upstream_reference": "https://github.com/JannisX11/blockbench/issues/2706",
+      "caveat": "The issue documents this as Minecraft China Edition. This does not establish that international/vanilla Bedrock will load it as a custom-entity resource."
     }
   ],
   "conclusion": {
@@ -189,6 +217,7 @@
     "bedrock_candidate_exporter_commit": "0c6d8bd15b64879435e4692e93c7d26d47da2426",
     "calibrated_static_route_commit": "f9c1a55cef155fbf879b1adebc401494b61ee9ca",
     "calibration_report": "haraganzito_static_bones_calibration_report.json",
-    "world_rigid_v2_commit": "bc7c8628aafcb4ddd7a05dad7ef0df73814bf106"
+    "world_rigid_v2_commit": "bc7c8628aafcb4ddd7a05dad7ef0df73814bf106",
+    "china_polymesh_exporter_commit": "6f50f416498683e2bdb26fef6e31f7fc05608379"
   }
 }
