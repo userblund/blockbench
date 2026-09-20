@@ -152,6 +152,15 @@
         "runtime_status": "pending_user_runtime_test"
       },
       "exporter": "plugins/haraganzito_calibrated_static.js"
+    },
+    {
+      "id": "bedrock_rigid_projection_rejected_v3",
+      "family": "bedrock_normal_rigid",
+      "purpose": "Diagnostic V3 with zero bone pivots and world-space rigid triangle geometry.",
+      "animated": true,
+      "runtime_status": "failed_user_test",
+      "failure_observation": "User screenshot 11442 shows the mesh broken into disconnected bone-driven pieces. Removing nonzero pivots does not solve the fundamental loss from replacing continuous vertex skinning by rigid triangle/bone assignment.",
+      "conclusion": "Stop iterating pivot/coordinate variants of rigid poly_mesh as the primary path. Preserve the exact working v1.0.0 static mesh and investigate a representation that carries per-vertex weights."
     }
   ],
   "conclusion": {
@@ -172,7 +181,7 @@
       "that native Blockbench weighted skinning can be serialized into a vanilla Bedrock runtime representation without loss",
       "that the native Blockbench weighted Armature representation survives Bedrock geometry export unchanged"
     ],
-    "engineering_decision": "Preserve full skinning natively first; treat standard vanilla poly_mesh as a lossy output boundary until a runtime-compatible weighted representation is proven."
+    "engineering_decision": "Do not spend further iterations on pivot-only or coordinate-only rigid poly_mesh variants. The user runtime test confirms the fundamental rigid-assignment failure. The next primary route is a weighted polymesh/skeleton representation or another runtime-compatible mechanism that preserves per-vertex multi-influence skinning."
   },
   "tooling": {
     "iterator_rigid_mapping_commit": "ec218f1a5736215d915fa0f7f518b6e27f5ff0dc",
