@@ -1,6 +1,8 @@
 name: Wery Morph Blockbench Windows
 
 on:
+  push:
+    branches: [wery-morph-glb-bridge]
   pull_request:
     branches: [master]
   workflow_dispatch:
