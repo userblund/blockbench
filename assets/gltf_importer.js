@@ -3013,6 +3013,7 @@
       if (typeof channel === "number") channel = "morph_" + channel;
       if (typeof channel === "string" && channel.startsWith("morph_")) {
         this.ensureChannel(parseInt(channel.slice(6), 10));
+        if (!this[channel]) Vue.set(this, channel, []);
       }
       if (!channel || !this[channel]) return;
       const kf = new Keyframe(data, uuid, this);
