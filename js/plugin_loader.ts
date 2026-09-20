@@ -1011,7 +1011,6 @@ if (isApp) {
 		try { fs.mkdirSync(Plugins.path, {recursive: true}); } catch (error) { console.error('[Wery Morph] plugin directory setup failed', error); }
 	}
 } else {
-	Plugins.path = Plugins.api_path+'/';else {
 	Plugins.path = Plugins.api_path+'/';
 }
 
