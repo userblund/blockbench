@@ -1,3 +1,4 @@
+import { MorphAnimator } from "../../animations/timeline_animators";
 import { Property } from "../../util/property";
 import { Face } from "../abstract/face";
 
@@ -1043,7 +1044,9 @@ export class Mesh extends OutlinerElement {
 		'toggle_visibility',
 		'delete'
 	]);
-	Mesh.prototype.buttons = [
+	Mesh.animator = MorphAnimator;
+
+Mesh.prototype.buttons = [
 		Outliner.buttons.export,
 		Outliner.buttons.locked,
 		Outliner.buttons.visibility,
