@@ -1007,9 +1007,11 @@ export type BBPlugin = Plugin;
 
 if (isApp) {
 	Plugins.path = app.getPath('userData')+osfs+'plugins'+osfs
-	if (!fs.existsSync(Plugins.path)) {
-		try { fs.mkdirSync(Plugins.path, {recursive: true}); } catch (error) { console.error('[Wery Morph] plugin directory setup failed', error); }
-	}
+	fs.readdir(Plugins.path, function(err) {
+		if (err) {
+			fs.mkdir(Plugins.path, function(a) {})
+		}
+	})
 } else {
 	Plugins.path = Plugins.api_path+'/';
 }
@@ -1056,28 +1058,6 @@ $.getJSON('https://blckbn.ch/api/stats/plugins?weeks=2', data => {
 })
 
 export async function loadInstalledPlugins() {
-	// Prepare the bundled Wery glTF importer only after Blockbench's core
-	// runtime is initialized.
-	if (isApp) {
-		try {
-			const bundled_gltf_plugin = PathModule.join(app.getAppPath(), 'assets', 'gltf_importer.js');
-			const installed_gltf_plugin = PathModule.join(Plugins.path, 'gltf_importer.js');
-			if (fs.existsSync(bundled_gltf_plugin)) {
-				fs.copyFileSync(bundled_gltf_plugin, installed_gltf_plugin);
-				Plugins.installed = Plugins.installed.filter(installation => installation?.id !== 'gltf_importer');
-				Plugins.installed.unshift({
-					id: 'gltf_importer',
-					version: '1.2.1-wery-morph',
-					disabled: false,
-					dependencies: [],
-					source: 'file',
-					path: installed_gltf_plugin
-				});
-			}
-		} catch (error) {
-			console.error('[Wery Morph] Failed to prepare bundled glTF importer', error);
-		}
-	}
 	if (Plugins.loading_promise) {
 		await Plugins.loading_promise;
 	}
